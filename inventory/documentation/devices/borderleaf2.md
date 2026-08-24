@@ -182,12 +182,21 @@ vlan 120
 
 *Inherited from Port-Channel Interface
 
+##### Encapsulation Dot1q Interfaces
+
+| Interface | Description | Vlan ID | Dot1q VLAN Tag | Dot1q Inner VLAN Tag |
+| --------- | ----------- | ------- | -------------- | -------------------- |
+| Ethernet3.3110 | fw1 VRF_RED transit | - | 3110 | - |
+| Ethernet3.3120 | fw1 VRF_BLUE transit | - | 3120 | - |
+
 ##### IPv4
 
 | Interface | Description | Channel Group | IP Address | VRF | MTU | Shutdown | ACL In | ACL Out |
 | --------- | ----------- | ------------- | ---------- | --- | --- | -------- | ------ | ------- |
 | Ethernet1 | P2P_spine1_Ethernet6 | - | 10.254.0.21/31 | default | 9214 | False | - | - |
 | Ethernet2 | P2P_spine2_Ethernet6 | - | 10.254.0.23/31 | default | 9214 | False | - | - |
+| Ethernet3.3110 | fw1 VRF_RED transit | - | 10.255.10.2/31 | VRF_RED | - | False | - | - |
+| Ethernet3.3120 | fw1 VRF_BLUE transit | - | 10.255.20.2/31 | VRF_BLUE | - | False | - | - |
 
 #### Ethernet Interfaces Device Configuration
 
@@ -206,6 +215,24 @@ interface Ethernet2
    mtu 9214
    no switchport
    ip address 10.254.0.23/31
+!
+interface Ethernet3
+   no shutdown
+   no switchport
+!
+interface Ethernet3.3110
+   description fw1 VRF_RED transit
+   no shutdown
+   encapsulation dot1q vlan 3110
+   vrf VRF_RED
+   ip address 10.255.10.2/31
+!
+interface Ethernet3.3120
+   description fw1 VRF_BLUE transit
+   no shutdown
+   encapsulation dot1q vlan 3120
+   vrf VRF_BLUE
+   ip address 10.255.20.2/31
 ```
 
 ### Loopback Interfaces
@@ -443,6 +470,8 @@ ASN Notation: asplain
 | 10.254.0.22 | 65100 | default | - | Inherited from peer group IPv4-UNDERLAY-PEERS | Inherited from peer group IPv4-UNDERLAY-PEERS | - | - | - | - | - | - |
 | 10.255.0.1 | 65100 | default | - | Inherited from peer group EVPN-OVERLAY-PEERS | Inherited from peer group EVPN-OVERLAY-PEERS | - | Inherited from peer group EVPN-OVERLAY-PEERS | - | - | - | - |
 | 10.255.0.2 | 65100 | default | - | Inherited from peer group EVPN-OVERLAY-PEERS | Inherited from peer group EVPN-OVERLAY-PEERS | - | Inherited from peer group EVPN-OVERLAY-PEERS | - | - | - | - |
+| 10.255.20.3 | 65500 | VRF_BLUE | - | - | 100 (warning-only) | - | - | - | - | - | - |
+| 10.255.10.3 | 65500 | VRF_RED | - | - | 100 (warning-only) | - | - | - | - | - | - |
 
 #### Router BGP EVPN Address Family
 
@@ -520,14 +549,30 @@ router bgp 65103
       route-target import evpn 20:20
       route-target export evpn 20:20
       router-id 10.255.2.6
+      neighbor 10.255.20.3 remote-as 65500
+      neighbor 10.255.20.3 description fw1 (VRF_BLUE)
+      neighbor 10.255.20.3 route-map RM-FW-IN in
+      neighbor 10.255.20.3 route-map RM-FW-OUT out
+      neighbor 10.255.20.3 maximum-routes 100 warning-only
       redistribute connected
+      !
+      address-family ipv4
+         neighbor 10.255.20.3 activate
    !
    vrf VRF_RED
       rd 10.255.2.6:10
       route-target import evpn 10:10
       route-target export evpn 10:10
       router-id 10.255.2.6
+      neighbor 10.255.10.3 remote-as 65500
+      neighbor 10.255.10.3 description fw1 (VRF_RED)
+      neighbor 10.255.10.3 route-map RM-FW-IN in
+      neighbor 10.255.10.3 route-map RM-FW-OUT out
+      neighbor 10.255.10.3 maximum-routes 100 warning-only
       redistribute connected
+      !
+      address-family ipv4
+         neighbor 10.255.10.3 activate
 ```
 
 ## BFD

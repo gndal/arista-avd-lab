@@ -162,6 +162,13 @@ topology:
         - ip link add link eth1 name eth1.3120 type vlan id 3120
         - ip addr add 10.255.20.1/31 dev eth1.3120
         - ip link set eth1.3120 up
+        - ip link set eth2 up
+        - ip link add link eth2 name eth2.3110 type vlan id 3110
+        - ip addr add 10.255.10.3/31 dev eth2.3110
+        - ip link set eth2.3110 up
+        - ip link add link eth2 name eth2.3120 type vlan id 3120
+        - ip addr add 10.255.20.3/31 dev eth2.3120
+        - ip link set eth2.3120 up
 
   links:
     # Underlay: every l3leaf to both spines.
@@ -190,3 +197,4 @@ topology:
 
     # Firewall uplink(s) -- currently one (single-homed), see docs/decisions.md.
     - endpoints: ["borderleaf1:eth3", "fw1:eth1"]
+    - endpoints: ["borderleaf2:eth3", "fw1:eth2"]

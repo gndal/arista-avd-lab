@@ -1,7 +1,7 @@
 ---
 # ANTA NRFU catalog. Run via playbooks/validate.yml as pre-check (before a
 # push) and post-check (after). Devices are tagged by registry `role` plus
-# "fw-uplink" for the one borderleaf with the fw1 uplink -- see
+# "fw-uplink" for every borderleaf with an fw1 uplink -- see
 # playbooks/validate.yml.
 #
 # One key per `anta.tests.X:` module -- YAML silently drops earlier
@@ -18,7 +18,8 @@ anta.tests.interfaces:
         - name: Ethernet2
           status: up
 
-  # fw-uplink, not "borderleaf" -- fw1 is single-homed, see docs/decisions.md.
+  # fw-uplink, not plain "borderleaf" -- correct regardless of how many
+  # borderleaves actually have an fw1 uplink, see docs/decisions.md.
   - VerifyInterfacesStatus:
       filters:
         tags: ["fw-uplink"]
@@ -102,13 +103,28 @@ anta.tests.connectivity:
   # ES-multihomed host are hash-dependent and unreliable; real host
   # reachability is proven by playbooks/verify_dataplane.yml instead. See
   # docs/troubleshooting.md.
+  #
+  # Split per device, not one shared "fw-uplink"-tagged entry -- each
+  # borderleaf has a different fw1-facing IP, and ANTA auto-tags every
+  # device with its own name, so that's what scopes each entry.
   - VerifyReachability:
       filters:
-        tags: ["fw-uplink"]
+        tags: ["borderleaf1"]
       hosts:
         - source: Ethernet3.3110
           destination: 10.255.10.1
           vrf: VRF_RED
         - source: Ethernet3.3120
           destination: 10.255.20.1
+          vrf: VRF_BLUE
+
+  - VerifyReachability:
+      filters:
+        tags: ["borderleaf2"]
+      hosts:
+        - source: Ethernet3.3110
+          destination: 10.255.10.3
+          vrf: VRF_RED
+        - source: Ethernet3.3120
+          destination: 10.255.20.3
           vrf: VRF_BLUE

@@ -23,40 +23,43 @@ logical partner.
 
 ## Routed firewall handoff, not an ESI-LAG to fw1
 
-`fw1` connects to `borderleaf1` over one plain routed link with a dot1q
+`fw1` connects to each borderleaf over a plain routed link with a dot1q
 subinterface per VRF (tags 3110/3120), not a bonded ESI-LAG.
 
 **Why:** offered as a choice, and this one was picked over bonding fw1 as a
 third ES member. A routed handoff gives ANTA and `verify_dataplane.yml` real,
-independently-addressable BGP sessions and interfaces to check per VRF --
-two sessions, each individually verifiable. An ESI-LAG would collapse that
-into one bundle and hide the interesting failure modes (e.g. one VRF's
-session flapping while the other stays up).
+independently-addressable BGP sessions and interfaces to check per VRF per
+borderleaf -- four sessions, each individually verifiable. An ESI-LAG would
+collapse that into one bundle and hide the interesting failure modes (e.g.
+one VRF's session flapping while the other stays up).
 
-## fw1 is single-homed to one borderleaf, not dual-homed to both
+## fw1 is dual-homed to both borderleaves
 
-An earlier version of this design connected `fw1` to *both* borderleaves --
-two physical links, two subinterfaces per VRF, four BGP sessions total
-(one per VRF per borderleaf), with `bgp bestpath as-path multipath-relax`
-on fw1's own FRR config to ECMP across the two paths per tenant. This was
-simplified to a single link/two sessions after review.
+`fw1` connects to both borderleaves -- two physical links, two
+subinterfaces per VRF, four BGP sessions total (one per VRF per
+borderleaf), with `bgp bestpath as-path multipath-relax` on fw1's own FRR
+config to ECMP across the two paths per tenant.
 
-**Why:** `fw1` is one non-redundant Linux container -- it has no
-active/standby pair of its own (see the "Known gaps" note in
-`docs/LLD.md`). Dual-homing it to both borderleaves protects against
-*borderleaf* failure, but does nothing for the actual single point of
-failure in this path: lose `fw1` itself and inter-VRF routing is down
-regardless of how many borderleaf links it has. The second link bought
-BGP-session-pair complexity (a second neighbor per VRF, `multipath-relax`,
-double the `route_map_in`/`route_map_out`/ACL wiring to keep consistent
-across two devices) for redundancy that didn't actually exist. If `fw1` is
-ever made genuinely redundant (an active/standby or active/active pair of
-firewall devices), dual-homing becomes worth reintroducing --
-`inventory/site_registry.yml`'s `firewall.uplinks` is deliberately still a
-list (of length one today) and `containerlab/topology.clab.yml.j2`/
-`network_services.yml` are both written generically over that list rather
-than assuming exactly one entry, specifically so that change would be
-additive rather than a rewrite.
+**History, since it explains some of the surrounding design:** this was
+briefly simplified to single-homed (one link, two sessions) on the
+reasoning that `fw1` is one non-redundant Linux container with no
+active/standby pair of its own, so a second borderleaf link protects
+against *borderleaf* failure but does nothing for the actual single point
+of failure in the path (`fw1` itself). That reasoning still holds as a
+general point, but the topology was reverted back to dual-homed by
+request. The reversal was a clean, small diff -- `inventory/site_
+registry.yml`'s `firewall.uplinks` was deliberately kept as a list (of
+length one during the single-homed period, written generically over
+throughout `containerlab/topology.clab.yml.j2` and `network_services.yml`
+rather than assuming exactly one entry) specifically so this exact change
+would be additive, and it was.
+
+**Real gotcha hit doing the reversal, worth remembering:** the push failed
+five times in a row with every device unreachable post-apply, which looked
+like CPU contention (all 8 devices doing a large `rollback clean-config`
+replay at once) but was not -- see `docs/troubleshooting.md`'s "stale
+render after a group_vars fix" entry for the actual cause and how it was
+diagnosed.
 
 ## fw1 advertises the default route only
 
@@ -153,20 +156,56 @@ has a node-scoping mechanism for *peer-level fields* (`bgp_peers[].nodes`,
 *object* placed in that file would render on every l3leaf-type node,
 including the four plain leaves that have no fw1 peer to ever apply it to.
 Second, boundary: every object in `BORDERLEAFS.yml` exists specifically
-because `borderleaf1` is the one device in the fabric with a peer outside
+because the borderleaves are the devices in the fabric with a peer outside
 AVD's own EVPN-VXLAN design (`fw1`) -- a leaf never needs a route-map or ACL
 of its own, because eos_designs generates its entire underlay/overlay policy
 itself. The split file is where genuinely edge-only config lives, not a
 stylistic reorganization of what network_services.yml already had.
 
-**Real limitation surfaced by building this out, not upfront design:**
-`custom_structured_configuration_route_maps` (used for `RM-FW-IN`/
-`RM-FW-OUT`, since route-maps have no eos_designs-native equivalent -- see
-that file's header) has no per-device "only renders if referenced" behavior
-the way eos_designs-native `ipv4_acls` does. Since both borderleaves are
-still members of the `BORDERLEAFS` group (only the fw1 *uplink* moved to
-being borderleaf1-only, not group membership), `RM-FW-IN`/`RM-FW-OUT` render
-on `borderleaf2` too, unreferenced and inert. Confirmed harmless (an
-unreferenced route-map does nothing), but worth knowing before assuming
-"defined in BORDERLEAFS.yml" and "only exists on the device that actually
-uses it" are the same guarantee -- they are not, for every object type.
+**Real limitation surfaced while fw1 was briefly single-homed (see the fw1
+dual-homed decision above), not upfront design, and now moot again since
+both borderleaves have an fw1 peer:** `custom_structured_configuration_
+route_maps` (used for `RM-FW-IN`/`RM-FW-OUT`, since route-maps have no
+eos_designs-native equivalent -- see that file's header) has no per-device
+"only renders if referenced" behavior the way eos_designs-native `ipv4_acls`
+does. While only one borderleaf had the fw1 uplink, `RM-FW-IN`/`RM-FW-OUT`
+still rendered on the other one too, unreferenced and inert (confirmed
+harmless -- an unreferenced route-map does nothing) -- but it's worth
+remembering that "defined in BORDERLEAFS.yml" and "only exists on the
+device that actually uses it" are NOT the same guarantee, for every
+object type.
+
+## Local tooling: repo-local `.venv` via `uv`, not a devcontainer
+
+Replaces `avd-venv`/`.lintvenv` with `uv venv .venv` + `uv pip sync
+requirements.lock.txt` -- a lockfile (`requirements.lock.txt`, compiled by
+`uv pip compile requirements.txt requirements-dev.txt`) resolving exact
+versions on top of the existing floor-only `requirements.txt`. Galaxy
+collections (`requirements.yml`) are still a separate `ansible-galaxy
+collection install` step -- uv has no equivalent for those.
+
+**Why not a devcontainer:** briefly built and live-tested (image built,
+tools worked, `--network=host` gave it reachability to the lab's mgmt
+network) but replaced almost immediately -- it added a Docker build/rebuild
+cycle and a VS Code Remote-SSH dependency for a problem that a lockfile
+already solves on its own: `requirements.txt` was already floor-only and
+manually re-resolved by hand; `uv` gives the same reproducibility (exact
+pins, one command to sync) without the container layer. `.devcontainer/`'s
+one real bug -- `build.context` defaulting to the `.devcontainer/` folder
+itself instead of the repo root, breaking the `COPY requirements.txt` step
+under the actual Dev Containers CLI even though a manual `docker build`
+test masked it -- is itself a small example of the kind of indirection a
+container build adds that a plain venv doesn't have.
+
+**Why repo-local, not the shared `~/avd-venv`:** portability -- a
+VM-wide shared venv doesn't travel to a different Arista system with its
+own inventory. `requirements.lock.txt` is committed, so `uv pip sync` on
+any host reproduces the same exact environment. CI is intentionally left
+on its own separately-maintained `~/avd-venv`/`.lintvenv` -- out of scope
+here, same as it was for the devcontainer attempt.
+
+Live-verified before adopting: `uv venv` (pulls its own pinned CPython
+3.12, independent of system Python), `uv pip compile`, `uv pip sync`, a
+real `ansible --version`/`yamllint`/`ansible-lint` run, eAPI reachability
+(`405` on `/command-api`), and a full `yamllint`/`ansible-lint` pass
+against the actual repo checkout -- all from inside the new `.venv`.

@@ -228,6 +228,52 @@ either an `eos_cli_config_gen` template override to change section
 rendering order, or applying the ACL via a separate incremental (non-`replace:
 config`) push after the interface already exists -- not attempted here.
 
+## Pushing a stale render after a group_vars fix looks exactly like CPU contention
+
+Hit reintroducing fw1's second borderleaf uplink (see docs/decisions.md's
+"fw1 is dual-homed" entry). Renaming `group_vars/all.yml` to a same-named
+sibling of the existing `group_vars/FABRIC/` directory
+(`group_vars/FABRIC.yml`) silently broke variable resolution -- Ansible does
+not merge a `<group>.yml` file and a `<group>/` directory for the same
+group, it drops one of them, in this case the file. Confirmed via
+`ansible-inventory --host spine1`: `ansible_password` resolved to nothing.
+
+Fixed by moving the content into the existing directory
+(`group_vars/FABRIC/connection.yml`) instead of a same-named sibling file.
+Confirmed the fix worked for Ansible's own connection variables -- but
+`playbooks/build.yml` (the render) had already been run once *before* that
+fix, using the broken variable resolution. The render it produced was
+missing `management api http-commands` and `aaa_settings` entirely, since
+those come from the same file, but it was never re-run after the fix.
+
+Every push after that used the stale render, and **every single one failed
+identically**: `deploy_confirm.yml`'s post-apply reachability check timed
+out for all 8 devices, the commit was never confirmed, and the device
+self-reverted on its 5-minute timer -- exactly deploy_confirm.yml's intended
+behavior for "a push that cuts its own management access," working
+correctly the whole time. It was misdiagnosed as CPU contention for five
+consecutive attempts (host load average was genuinely elevated at the time,
+which fit that theory well enough to be actively misleading) -- switching
+from parallel to serialized (`--forks 1`) pushes and waiting progressively
+longer between attempts both failed to help, because neither addressed the
+real cause. The actual signal that broke the misdiagnosis: SSH access to
+the devices kept working throughout, which a genuine CPU-contention/
+convergence-delay theory does not explain, but "eAPI was never enabled by
+the push" does immediately.
+
+**How it was actually found:** grepping the rendered `.cfg` file directly
+for `management api http-commands` -- zero matches. Re-running
+`playbooks/build.yml` after the group_vars fix (not just trusting that the
+fix was in place) produced a render that included it, and the very next
+push confirmed cleanly on the first try.
+
+**Lesson:** after any group_vars structural change, re-run `playbooks/
+build.yml` and grep the regenerated `.cfg` for the specific settings that
+change touched, before assuming a fix that resolved one symptom (Ansible's
+own connection vars, checkable via `ansible-inventory`) also fixed the
+render (a completely separate consumer of the same variables, only
+checkable by regenerating and reading the actual output).
+
 ## `show bgp evpn ethernet-segment` is not a valid command on this cEOS build
 
 Tried while investigating the above, as a way to directly inspect DF

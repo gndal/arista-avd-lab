@@ -32,6 +32,30 @@ ethernet_interfaces:
     peer_type: spine
   switchport:
     enabled: false
+- name: Ethernet3.3120
+  description: fw1 VRF_BLUE transit
+  shutdown: false
+  vrf: VRF_BLUE
+  encapsulation_dot1q:
+    vlan: 3120
+  ip_address: 10.255.20.2/31
+  metadata:
+    peer_type: l3_interface
+- name: Ethernet3.3110
+  description: fw1 VRF_RED transit
+  shutdown: false
+  vrf: VRF_RED
+  encapsulation_dot1q:
+    vlan: 3110
+  ip_address: 10.255.10.2/31
+  metadata:
+    peer_type: l3_interface
+- name: Ethernet3
+  shutdown: false
+  metadata:
+    peer_type: l3_interface
+  switchport:
+    enabled: false
 hostname: borderleaf2
 ip_igmp_snooping:
   globally_enabled: true
@@ -209,9 +233,21 @@ router_bgp:
         route_targets:
         - '20:20'
     router_id: 10.255.2.6
+    neighbors:
+    - ip_address: 10.255.20.3
+      remote_as: '65500'
+      description: fw1 (VRF_BLUE)
+      maximum_routes: 100
+      maximum_routes_warning_only: true
+      route_map_in: RM-FW-IN
+      route_map_out: RM-FW-OUT
     redistribute:
       connected:
         enabled: true
+    address_family_ipv4:
+      neighbors:
+      - ip_address: 10.255.20.3
+        activate: true
   - name: VRF_RED
     rd: 10.255.2.6:10
     route_targets:
@@ -224,9 +260,21 @@ router_bgp:
         route_targets:
         - '10:10'
     router_id: 10.255.2.6
+    neighbors:
+    - ip_address: 10.255.10.3
+      remote_as: '65500'
+      description: fw1 (VRF_RED)
+      maximum_routes: 100
+      maximum_routes_warning_only: true
+      route_map_in: RM-FW-IN
+      route_map_out: RM-FW-OUT
     redistribute:
       connected:
         enabled: true
+    address_family_ipv4:
+      neighbors:
+      - ip_address: 10.255.10.3
+        activate: true
 service_routing_protocols_model: multi-agent
 spanning_tree:
   mode: none

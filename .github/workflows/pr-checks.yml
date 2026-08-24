@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
-      - run: pip install yamllint ansible-lint
+      - run: pip install -r requirements-dev.txt
       # Pre-install the collection so ansible-lint finds it already present
       # instead of auto-resolving it itself -- left to its own devices it
       # installs into (and then also lints) the collection's own source,

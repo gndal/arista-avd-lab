@@ -19,7 +19,8 @@ proven while building this.
 ```
 inventory/site_registry.yml     single source of truth: nodes, cabling, hosts, firewall
 inventory/inventory.yml         GENERATED from the registry
-inventory/group_vars/           AVD data model (fabric_variables.yml, network_services.yml)
+inventory/group_vars/           AVD data model: SPINES.yml, L3LEAFS.yml, BORDERLEAFS.yml,
+                                 FABRIC/{connection,fabric_variables,network_services}.yml
 inventory/intended/             committed render (configs + structured configs)
 templates/                      Jinja2 templates the registry renders into
 containerlab/topology.clab.yml  GENERATED from the registry

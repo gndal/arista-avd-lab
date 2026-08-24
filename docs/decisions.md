@@ -1,7 +1,10 @@
 # Design decisions
 
 ADR-style record of the choices made building this repo, and why. Read this
-before changing any of them.
+before changing any of them. This file owns rationale only -- incident
+narratives (root cause, how it was found, the fix) live in
+`docs/troubleshooting.md`; this file cross-references them rather than
+retelling them.
 
 ## ESI multihoming instead of MLAG
 
@@ -54,12 +57,8 @@ throughout `containerlab/topology.clab.yml.j2` and `network_services.yml`
 rather than assuming exactly one entry) specifically so this exact change
 would be additive, and it was.
 
-**Real gotcha hit doing the reversal, worth remembering:** the push failed
-five times in a row with every device unreachable post-apply, which looked
-like CPU contention (all 8 devices doing a large `rollback clean-config`
-replay at once) but was not -- see `docs/troubleshooting.md`'s "stale
-render after a group_vars fix" entry for the actual cause and how it was
-diagnosed.
+**Real incident hit doing the reversal** -- see `docs/troubleshooting.md`'s
+"stale render after a group_vars fix" entry for the full root cause.
 
 ## fw1 advertises the default route only
 

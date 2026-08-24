@@ -3,7 +3,10 @@
 What was actually checked, when, and how -- not just "it should work." All
 commands run against the live fabric on the containerlab VM
 (`192.168.1.132`), lab name `esidc`. Dates below are the day this repo was
-first built and verified end to end.
+first built and verified end to end. This file owns pass/fail evidence and
+the commands that produced it -- root-cause narratives live in
+`docs/troubleshooting.md`; this file cross-references them rather than
+retelling them.
 
 ## 2026-08-24: full cold-start rebuild, twice
 
@@ -99,10 +102,8 @@ see `docs/troubleshooting.md` for the full story on each:
 - `VerifyVxlanVniBinding`'s L2 VNI entries need a VLAN id (int), not a VRF
   name (str) -- and the VNI number itself was wrong in an earlier draft
   (`10120` instead of the correct `20120`).
-- `VerifyEVPNType2Route` had to be scoped to spines only, and a small
-  ARP-warming ping added, once EVPN's ES-peer route-import suppression
-  (`docs/troubleshooting.md`) and ordinary MAC-table aging were both
-  understood as real, separate causes of the same symptom.
+- `VerifyEVPNType2Route` scoped to spines only, with an ARP-warming
+  pre-check -- see `docs/troubleshooting.md`'s EVPN local-bias entry for why.
 - A leaf-to-locally-attached-host `VerifyReachability` test was tried and
   then deliberately dropped, for the same ES-peer reason -- see
   `docs/decisions.md`.
@@ -163,9 +164,9 @@ appear only where expected.
   The empty-AS-path assumption (these routes are effectively originated
   fresh into the VRF's own IPv4-unicast BGP process when leaked from EVPN,
   not carrying forward their EVPN-side AS-path) held.
-- `ACL-FW-TRANSIT-IN` was found to fail the push outright the first time it
-  was wired to an interface -- see docs/troubleshooting.md's ordering entry.
-  It stayed defined-but-unreferenced after that; not re-attempted here.
+- `ACL-FW-TRANSIT-IN` failed to push when first wired to an interface -- see
+  `docs/troubleshooting.md`'s ordering entry. Confirmed post-revert neither
+  borderleaf's running-config references it.
 
 **fw1 single-homing:** after the redeploy + push, confirmed exactly one
 link in the generated topology (`grep fw1
@@ -191,22 +192,10 @@ on `fw1` itself (`vtysh -c "show bgp summary"` inside the `fw1` container --
 `borderleaf1-VRF_RED`, `borderleaf2-VRF_RED`, plus both VRF_BLUE sessions,
 each with `PfxRcd: 3`).
 
-Hit a real, fully misdiagnosed-at-first incident getting the push to land --
-five consecutive push failures, all with the identical "device unreachable
-post-apply, self-reverts" signature, initially attributed to CPU contention
-from pushing all 8 devices' large `rollback clean-config` replay in
-parallel. The actual cause was unrelated: a stale render (missing `management
-api http-commands` and `aaa_settings` entirely) left over from *before* an
-earlier group_vars structural fix, never regenerated afterward -- see
-`docs/troubleshooting.md`'s "stale render after a group_vars fix" entry for
-the full diagnostic path, including the detail that broke the misdiagnosis
-(SSH access kept working throughout, which a CPU-contention theory doesn't
-explain but "eAPI was never enabled by the push" does). Once `playbooks/
-build.yml` was re-run and the regenerated `.cfg` was confirmed to actually
-contain `management api http-commands`, the very next push confirmed
-cleanly on the first try, with default (parallel) forks -- the earlier
-switch to `--forks 1` (serialized) had not been the fix either, just another
-red herring consistent with the wrong theory.
+Hit a real incident getting the push to land (five consecutive failures,
+initially misdiagnosed as CPU contention) -- see `docs/troubleshooting.md`'s
+"stale render after a group_vars fix" entry for the root cause and how it
+was found. Once fixed, the next push confirmed cleanly on the first try.
 
 **Full re-verification after the fix, on the dual-homed fabric:** 62/62 ANTA
 tests (back up from 59, now that both borderleaves carry the `fw-uplink`

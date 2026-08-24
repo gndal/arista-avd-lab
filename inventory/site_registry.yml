@@ -1,7 +1,8 @@
 ---
 # Single source of truth for node identity and cabling. Generates
 # containerlab/topology.clab.yml and inventory/inventory.yml, and validates
-# group_vars/FABRIC/fabric_variables.yml against it -- see
+# group_vars/FABRIC/fabric_variables.yml AND group_vars/FABRIC/network_services.yml
+# (firewall handoff, ESI host attachments) against it -- see
 # playbooks/render_lab.yml and docs/decisions.md.
 #
 #   ansible-playbook playbooks/render_lab.yml                  write the files

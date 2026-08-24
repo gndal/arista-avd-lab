@@ -1,0 +1,22 @@
+{
+  "name": "eos-avd-anta-dc tooling",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  // Host networking, not a Docker network attach: gives the container the
+  // same reachability as running ansible directly on the VM (172.40.40.0/24
+  // mgmt network is only routable from there -- see docs/troubleshooting.md).
+  // Requires opening this repo via Remote-SSH into the VM first, so "build"
+  // happens against the VM's own Docker daemon, not a local one.
+  "runArgs": ["--network=host"],
+  "remoteUser": "dev",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "redhat.ansible",
+        "redhat.vscode-yaml",
+        "ms-python.python"
+      ]
+    }
+  }
+}

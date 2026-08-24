@@ -1,7 +1,8 @@
 {
   "name": "eos-avd-anta-dc tooling",
   "build": {
-    "dockerfile": "Dockerfile"
+    "dockerfile": "Dockerfile",
+    "context": ".."
   },
   // Host networking, not a Docker network attach: gives the container the
   // same reachability as running ansible directly on the VM (172.40.40.0/24

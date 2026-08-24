@@ -202,6 +202,16 @@ router_bgp:
       - 20120:20120
     redistribute_routes:
     - learned
+  - id: 130
+    metadata:
+      tenants:
+      - Tenant_Blue
+    rd: 10.255.2.4:20130
+    route_targets:
+      both:
+      - 20130:20130
+    redistribute_routes:
+    - learned
   - id: 110
     metadata:
       tenants:
@@ -275,6 +285,14 @@ vlan_interfaces:
   metadata:
     tenants:
     - Tenant_Blue
+- name: Vlan130
+  description: BLUE_Db
+  shutdown: false
+  vrf: VRF_BLUE
+  ip_address_virtual: 10.20.130.1/24
+  metadata:
+    tenants:
+    - Tenant_Blue
 - name: Vlan110
   description: RED_App
   shutdown: false
@@ -291,6 +309,11 @@ vlan_internal_order:
 vlans:
 - id: 120
   name: BLUE_App
+  metadata:
+    tenants:
+    - Tenant_Blue
+- id: 130
+  name: BLUE_Db
   metadata:
     tenants:
     - Tenant_Blue
@@ -321,6 +344,8 @@ vxlan_interface:
       vlans:
       - id: 120
         vni: 20120
+      - id: 130
+        vni: 20130
       - id: 110
         vni: 10110
       vrfs:

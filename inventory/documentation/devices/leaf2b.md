@@ -157,6 +157,7 @@ vlan internal order ascending range 1006 1199
 | ------- | ---- | ------------ |
 | 110 | RED_App | - |
 | 120 | BLUE_App | - |
+| 130 | BLUE_Db | - |
 
 ### VLANs Device Configuration
 
@@ -167,6 +168,9 @@ vlan 110
 !
 vlan 120
    name BLUE_App
+!
+vlan 130
+   name BLUE_Db
 ```
 
 ## Interfaces
@@ -326,6 +330,7 @@ interface Loopback101
 | --------- | ----------- | --- | --- | -------- |
 | Vlan110 | RED_App | VRF_RED | - | False |
 | Vlan120 | BLUE_App | VRF_BLUE | - | False |
+| Vlan130 | BLUE_Db | VRF_BLUE | - | False |
 
 ##### IPv4
 
@@ -333,6 +338,7 @@ interface Loopback101
 | --------- | --- | ---------- | ------------------ | ------------------------- | ------ | ------- |
 | Vlan110 | VRF_RED | - | 10.10.110.1/24 | - | - | - |
 | Vlan120 | VRF_BLUE | - | 10.20.120.1/24 | - | - | - |
+| Vlan130 | VRF_BLUE | - | 10.20.130.1/24 | - | - | - |
 
 #### VLAN Interfaces Device Configuration
 
@@ -349,6 +355,12 @@ interface Vlan120
    no shutdown
    vrf VRF_BLUE
    ip address virtual 10.20.120.1/24
+!
+interface Vlan130
+   description BLUE_Db
+   no shutdown
+   vrf VRF_BLUE
+   ip address virtual 10.20.130.1/24
 ```
 
 ### VXLAN Interface
@@ -366,6 +378,7 @@ interface Vlan120
 | ---- | --- | ---------- | --------------- |
 | 110 | 10110 | - | - |
 | 120 | 20120 | - | - |
+| 130 | 20130 | - | - |
 
 ##### VRF to VNI and Multicast Group Mappings
 
@@ -384,6 +397,7 @@ interface Vxlan1
    vxlan udp-port 4789
    vxlan vlan 110 vni 10110
    vxlan vlan 120 vni 20120
+   vxlan vlan 130 vni 20130
    vxlan vrf VRF_BLUE vni 20
    vxlan vrf VRF_RED vni 10
 ```
@@ -519,6 +533,7 @@ ASN Notation: asplain
 | ---- | ------------------- | ----------------- | ------------------- | ------------------- | ------------ |
 | 110 | 10.255.2.4:10110 | 10110:10110 | - | - | learned |
 | 120 | 10.255.2.4:20120 | 20120:20120 | - | - | learned |
+| 130 | 10.255.2.4:20130 | 20130:20130 | - | - | learned |
 
 #### Router BGP VRFs
 
@@ -567,6 +582,11 @@ router bgp 65102
    vlan 120
       rd 10.255.2.4:20120
       route-target both 20120:20120
+      redistribute learned
+   !
+   vlan 130
+      rd 10.255.2.4:20130
+      route-target both 20130:20130
       redistribute learned
    !
    address-family evpn

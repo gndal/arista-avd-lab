@@ -55,6 +55,10 @@ tenants:
             name: BLUE_App
             enabled: true
             ip_address_virtual: 10.20.120.1/24
+          - id: 130
+            name: BLUE_Db
+            enabled: true
+            ip_address_virtual: 10.20.130.1/24
         l3_interfaces:
           - description: "fw1 VRF_BLUE transit"
             interfaces: [Ethernet3.3120, Ethernet3.3120]

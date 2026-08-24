@@ -1,3 +1,4 @@
+# Keep in sync with .yamllint's ignore: block for the same generated paths.
 collections/
 roles/
 *.retry
@@ -12,3 +13,5 @@ inventory/anta_inventory.generated.yml
 # Backstop only -- eos_designs_documentation.enable/eos_cli_config_gen_documentation.enable
 # are set false in group_vars/FABRIC/fabric_variables.yml, so this shouldn't regenerate.
 inventory/documentation/
+# inventory/intended/ is deliberately NOT listed here -- it's committed
+# AVD output (see docs/LLD.md), just excluded from .yamllint's lint pass.

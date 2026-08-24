@@ -181,6 +181,60 @@ borderleaves; see `tests/anta_catalog.yml`'s header for the tag mechanism),
 all 4 `verify_dataplane.yml` checks including the negative TCP-blocked
 case.
 
+## fw1 reverted back to dual-homed (2026-08-24)
+
+Reintroduced fw1's second borderleaf uplink -- see `docs/decisions.md`.
+Confirmed 2 links in the regenerated topology (`grep fw1
+containerlab/topology.clab.yml`) and, after a full destroy+redeploy (a
+physical link addition, not just a config push), 4 Established BGP sessions
+on `fw1` itself (`vtysh -c "show bgp summary"` inside the `fw1` container --
+`borderleaf1-VRF_RED`, `borderleaf2-VRF_RED`, plus both VRF_BLUE sessions,
+each with `PfxRcd: 3`).
+
+Hit a real, fully misdiagnosed-at-first incident getting the push to land --
+five consecutive push failures, all with the identical "device unreachable
+post-apply, self-reverts" signature, initially attributed to CPU contention
+from pushing all 8 devices' large `rollback clean-config` replay in
+parallel. The actual cause was unrelated: a stale render (missing `management
+api http-commands` and `aaa_settings` entirely) left over from *before* an
+earlier group_vars structural fix, never regenerated afterward -- see
+`docs/troubleshooting.md`'s "stale render after a group_vars fix" entry for
+the full diagnostic path, including the detail that broke the misdiagnosis
+(SSH access kept working throughout, which a CPU-contention theory doesn't
+explain but "eAPI was never enabled by the push" does). Once `playbooks/
+build.yml` was re-run and the regenerated `.cfg` was confirmed to actually
+contain `management api http-commands`, the very next push confirmed
+cleanly on the first try, with default (parallel) forks -- the earlier
+switch to `--forks 1` (serialized) had not been the fix either, just another
+red herring consistent with the wrong theory.
+
+**Full re-verification after the fix, on the dual-homed fabric:** 62/62 ANTA
+tests (back up from 59, now that both borderleaves carry the `fw-uplink`
+tag again -- `tests/anta_catalog.yml`'s `VerifyReachability` for the
+borderleaf-to-fw1 /31s is split into two device-specific entries now, since
+each borderleaf has a different fw1-facing IP), all 4
+`verify_dataplane.yml` checks including the negative TCP-blocked case.
+
+## GitHub/GitLab dual-deploy collision (2026-08-24)
+
+`gndal/arista-avd-lab`'s squashed export predates the fw1 dual-homing
+reversal -- its `borderleaf2.cfg` has zero `Ethernet3.x` subinterfaces.
+Merging two unrelated (tooling-only) PRs there triggered its self-hosted
+`deploy.yml`, which pushed that stale config to the same live devices
+GitLab manages, silently reverting `borderleaf2` to single-homed. GitLab's
+`precheck` caught the resulting drift on the next pipeline and failed
+correctly rather than pushing on top of unknown state.
+
+**Fix:** re-ran `playbooks/deploy_confirm.yml` from GitLab's `main` (its
+intended config was still correct) directly against the live fabric.
+Full re-verification: 62/62 ANTA tests, all 4 `verify_dataplane.yml`
+checks, confirmed live.
+
+**Lesson:** the two CI systems deploying to the same physical devices is a
+real, standing risk, not just a hypothetical -- GitHub's copy needs to be
+manually re-synced with GitLab before it's safe to merge anything there
+again, tooling-only changes included.
+
 ## Not yet exercised
 
 - The exact `show` command for inspecting EVPN DF election directly was not

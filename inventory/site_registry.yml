@@ -143,7 +143,7 @@ hosts:
       - {peer: leaf2b, peer_port: Ethernet4}
 
 # Inter-VRF firewall: no VRFs of its own, routed (not ESI-LAG) handoff,
-# single-homed to borderleaf1 -- see docs/decisions.md.
+# dual-homed to both borderleaves -- see docs/decisions.md.
 firewall:
   name: fw1
   mgmt: 172.40.40.51
@@ -154,3 +154,8 @@ firewall:
       subinterfaces:
         - {vrf: VRF_RED, tag: 3110, local: 10.255.10.1/31, remote: 10.255.10.0/31}
         - {vrf: VRF_BLUE, tag: 3120, local: 10.255.20.1/31, remote: 10.255.20.0/31}
+    - peer: borderleaf2
+      peer_port: Ethernet3
+      subinterfaces:
+        - {vrf: VRF_RED, tag: 3110, local: 10.255.10.3/31, remote: 10.255.10.2/31}
+        - {vrf: VRF_BLUE, tag: 3120, local: 10.255.20.3/31, remote: 10.255.20.2/31}

@@ -36,13 +36,18 @@ tests/anta_catalog.yml          the ANTA NRFU test catalog
 ## Running it
 
 Everything below runs from the containerlab VM (`192.168.1.132`, user
-`oser`), using the shared `~/avd-venv` (pyavd 6.3.0 + anta 1.9.0 already
-installed there). This repo does not install its own copy of the AVD
-toolchain -- see `requirements.txt`/`requirements.yml` for what venv it
-expects.
+`oser`) -- that's the only host with a route to the lab's mgmt network. Local
+tooling is a repo-local `.venv` managed by [uv](https://docs.astral.sh/uv/),
+pinned by `requirements.lock.txt` (compiled from the floor-only
+`requirements.txt`/`requirements-dev.txt` -- see that file's header for the
+pinning policy). CI uses its own separately-maintained `~/avd-venv`, not this
+`.venv` -- see `.gitlab-ci.yml`.
 
 ```bash
-source ~/avd-venv/bin/activate
+uv venv .venv --python 3.12          # once
+uv pip sync requirements.lock.txt    # once, and after any requirements*.txt change
+ansible-galaxy collection install -r requirements.yml   # once
+source .venv/bin/activate
 
 # 1. Generate topology.clab.yml + inventory.yml from the registry
 ansible-playbook playbooks/render_lab.yml
@@ -83,6 +88,3 @@ See the top of `.gitlab-ci.yml` for the exact stage graph and
 Required CI/CD variables on this project: `GITLAB_API_TOKEN` (masked, **not**
 protected -- MR pipelines run on unprotected branches). `EOS_USERNAME` /
 `EOS_PASSWORD` are optional and default to `admin`/`admin`.
-
----
-Mirrored from a private GitLab instance where this is developed day-to-day.

@@ -22,16 +22,16 @@ containerlab VM at once, capacity permitting -- they cannot run
    leaf1a(.21) leaf1b(.22)   leaf2a(.23) leaf2b(.24)   borderleaf1(.31) borderleaf2(.32)
    \___ AS 65101 ___/        \___ AS 65102 ___/         \____ AS 65103 ____/
    ESI pair, RACK1            ESI pair, RACK2            pair, no shared ESI
-     |Eth3  |Eth4               |Eth3  |Eth4                |Eth3       (no fw1 link)
-   h1-red h1-blue              h2-red h2-blue                |
+     |Eth3  |Eth4               |Eth3  |Eth4                |Eth3        |Eth3
+   h1-red h1-blue              h2-red h2-blue                |           |
    (.41)  (.42)                (.43)  (.44)                  fw1 (.51), AS 65500
-   bond0, LACP 802.3ad to both leaves in the pair        eth1 routed, dot1q per VRF
+   bond0, LACP 802.3ad to both leaves in the pair        eth1/eth2 routed, dot1q per VRF
 ```
 
-`fw1` is single-homed to `borderleaf1` only -- `borderleaf2` has no cabling
-to it at all (not even an unused `Ethernet3`). See `docs/decisions.md` for
-why: fw1 is one non-redundant device, so a second uplink would not have
-bought real redundancy, only complexity.
+`fw1` is dual-homed to both borderleaves -- one routed link each, four BGP
+sessions total (one per VRF per borderleaf). See `docs/decisions.md` for the
+history here: this was briefly single-homed to `borderleaf1` only, then
+reverted back to dual-homed by request.
 
 - Underlay/overlay: eBGP, unique-per-pair ASN (`65101`/`65102`/`65103`),
   spines share `65100` (they never peer with each other, only with leaves,
@@ -63,29 +63,28 @@ L2 VNI = `mac_vrf_vni_base + vlan_id` (AVD's default scheme) -- 10000+110,
 
 ## Firewall handoff
 
-Routed, a single link from `borderleaf1` to `fw1`, one dot1q subinterface
-per VRF (tags 3110 / 3120, deliberately not the tenant VLAN ids, so a
-transit tag can never be confused with a tenant L2 domain):
+Routed, one link per borderleaf, one dot1q subinterface per VRF (tags 3110 /
+3120, deliberately not the tenant VLAN ids, so a transit tag can never be
+confused with a tenant L2 domain):
 
-| VRF | borderleaf1 | fw1 |
-|---|---|---|
-| RED  | 10.255.10.0/31 | 10.255.10.1/31 |
-| BLUE | 10.255.20.0/31 | 10.255.20.1/31 |
+| VRF | borderleaf1 | fw1 | borderleaf2 | fw1 |
+|---|---|---|---|---|
+| RED  | 10.255.10.0/31 | 10.255.10.1/31 | 10.255.10.2/31 | 10.255.10.3/31 |
+| BLUE | 10.255.20.0/31 | 10.255.20.1/31 | 10.255.20.2/31 | 10.255.20.3/31 |
 
 `fw1` has no VRFs of its own -- both tenants' routes land in one FRR table,
 and `nftables` decides what may cross (ICMP only). See `docs/decisions.md`
-for why `fw1` advertises only `0.0.0.0/0` back into the fabric, and for why
-this handoff is single-homed rather than dual-homed to both borderleaves.
+for why `fw1` advertises only `0.0.0.0/0` back into the fabric.
 
 ### Borderleaf-only policy (`group_vars/BORDERLEAFS.yml`)
 
-Everything below exists specifically because `borderleaf1` is the one
-device in the fabric peering with something eos_designs doesn't itself
+Everything below exists specifically because the borderleaves are the
+devices in the fabric peering with something eos_designs doesn't itself
 model (`fw1`, a plain external eBGP speaker) -- see that file's own header
 for the fuller case for why this content has its own group_vars file rather
-than living in `FABRIC/network_services.yml` alongside the peer IPs. All
-four objects are live-verified, not just rendered -- see
-`docs/verification.md`.
+than living in `FABRIC/network_services.yml` alongside the peer IPs. Applied
+identically to both borderleaves' fw1 sessions. All four objects are
+live-verified, not just rendered -- see `docs/verification.md`.
 
 | Object | Kind | Applied via | What it does |
 |---|---|---|---|

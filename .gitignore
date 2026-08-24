@@ -3,6 +3,7 @@ roles/
 *.retry
 .vault_pass
 .lintvenv/
+.venv/
 containerlab/clab-*/
 containerlab/*.annotations.json
 __pycache__/

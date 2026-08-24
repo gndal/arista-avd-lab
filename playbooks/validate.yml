@@ -14,16 +14,16 @@
     anta_password: "{{ lookup('env', 'ANTA_PASSWORD') | default('admin', true) }}"
   tasks:
     - name: Build the ANTA host list from the site registry
-      # "fw-uplink" tag added only to registry.firewall.uplinks[0].peer -- see
-      # docs/decisions.md for why "borderleaf" alone isn't enough to scope
-      # fw1-specific tests since fw1 went single-homed.
+      # "fw-uplink" tag added to every node in registry.firewall.uplinks[].peer
+      # -- see docs/decisions.md for why plain "borderleaf" isn't enough to
+      # scope fw1-specific tests (not every borderleaf necessarily has one).
       ansible.builtin.set_fact:
         anta_hosts: >-
           {{ (anta_hosts | default([])) + [{
                'name': item.name,
                'host': item.mgmt,
                'port': 443,
-               'tags': [item.role] + (['fw-uplink'] if item.name == registry.firewall.uplinks[0].peer else [])
+               'tags': [item.role] + (['fw-uplink'] if item.name in (registry.firewall.uplinks | map(attribute='peer') | list) else [])
              }] }}
       loop: "{{ registry.nodes }}"
       loop_control:

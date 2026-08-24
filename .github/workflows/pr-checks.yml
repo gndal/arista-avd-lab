@@ -17,6 +17,11 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - run: pip install yamllint ansible-lint
+      # Pre-install the collection so ansible-lint finds it already present
+      # instead of auto-resolving it itself -- left to its own devices it
+      # installs into (and then also lints) the collection's own source,
+      # producing hundreds of false-positive findings unrelated to this repo.
+      - run: ansible-galaxy collection install -r requirements.yml
       - run: yamllint .
       - run: ansible-lint
 

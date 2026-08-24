@@ -14,13 +14,22 @@ overlay_evpn: true
 
 p2p_uplinks_mtu: 9214
 
+# inventory/documentation/ has no consumer in this repo (not referenced by
+# any doc, playbook, or CI drift check) -- disabled rather than generated
+# and left to rot. See docs/decisions.md.
+eos_designs_documentation:
+  enable: false
+eos_cli_config_gen_documentation:
+  enable: false
+
 spine:
   defaults:
     # MUST be cEOSLab exactly -- a near-miss string silently falls back to
     # the unsupported "default" profile. See docs/decisions.md.
     platform: cEOSLab
-    # cEOSLab's platform profile sets Management1, outranking all.yml's
-    # setting -- required here too, or a push cuts its own mgmt access.
+    # cEOSLab's platform profile sets Management1, outranking
+    # FABRIC/connection.yml's setting -- required here too, or a push cuts
+    # its own mgmt access.
     mgmt_interface: Management0
     bgp_as: 65100
     loopback_ipv4_pool: 10.255.0.0/24
@@ -75,7 +84,7 @@ l3leaf:
           uplink_switch_interfaces: [Ethernet4, Ethernet4]
 
     # Redundant pair, but not an ethernet segment -- fw1's handoff is routed,
-    # single-homed to borderleaf1. See network_services.yml, docs/decisions.md.
+    # dual-homed to both borderleaves. See network_services.yml, docs/decisions.md.
     - group: BORDER
       bgp_as: 65103
       nodes:

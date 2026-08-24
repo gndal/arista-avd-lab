@@ -9,3 +9,6 @@ containerlab/*.annotations.json
 __pycache__/
 *.pyc
 inventory/anta_inventory.generated.yml
+# Backstop only -- eos_designs_documentation.enable/eos_cli_config_gen_documentation.enable
+# are set false in group_vars/FABRIC/fabric_variables.yml, so this shouldn't regenerate.
+inventory/documentation/

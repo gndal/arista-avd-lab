@@ -108,9 +108,12 @@ inventory/site_registry.yml                  SoT: nodes, cabling, hosts, firewal
         v
 containerlab/topology.clab.yml               GENERATED
 inventory/inventory.yml                      GENERATED
-inventory/group_vars/{all,SPINES,L3LEAFS}.yml   hand-authored, VALIDATED against registry
-inventory/group_vars/FABRIC/fabric_variables.yml     "
-inventory/group_vars/FABRIC/network_services.yml     "
+inventory/group_vars/SPINES.yml                      hand-authored, VALIDATED against registry
+inventory/group_vars/L3LEAFS.yml                          "
+inventory/group_vars/BORDERLEAFS.yml                      "  (fw1-handoff-only objects)
+inventory/group_vars/FABRIC/connection.yml                "  (Ansible connection vars)
+inventory/group_vars/FABRIC/fabric_variables.yml           "
+inventory/group_vars/FABRIC/network_services.yml           "
         |
         | playbooks/build.yml (arista.avd.eos_designs + eos_cli_config_gen)
         v
@@ -121,6 +124,13 @@ inventory/intended/configs/*.cfg             GENERATED, committed
         v
         live fabric
 ```
+
+`group_vars/` placement rule: files scoped to eos_designs' fabric-wide
+group live under `FABRIC/` (connection.yml, fabric_variables.yml,
+network_services.yml); files scoped to AVD-native device-type groups
+(SPINES, L3LEAFS) or a real-but-AVD-invisible Ansible child group
+(BORDERLEAFS) are flat at the group_vars/ top level, one file per group,
+named after the group.
 
 `playbooks/render_lab.yml --check --diff` is the CI drift gate for the first
 half of this chain (registry vs. generated files vs. hand-authored

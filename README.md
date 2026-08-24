@@ -83,3 +83,6 @@ See the top of `.gitlab-ci.yml` for the exact stage graph and
 Required CI/CD variables on this project: `GITLAB_API_TOKEN` (masked, **not**
 protected -- MR pipelines run on unprotected branches). `EOS_USERNAME` /
 `EOS_PASSWORD` are optional and default to `admin`/`admin`.
+
+---
+Mirrored from a private GitLab instance where this is developed day-to-day.

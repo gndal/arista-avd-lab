@@ -1,0 +1,35 @@
+---
+# Connection + local-admin settings shared by every EOS device. admin/admin,
+# no vault -- disposable containerlab lab.
+
+ansible_connection: ansible.netcommon.httpapi
+ansible_network_os: arista.eos.eos
+ansible_httpapi_use_ssl: true
+ansible_httpapi_validate_certs: false
+ansible_httpapi_port: 443
+ansible_user: admin
+ansible_password: admin
+ansible_become: true
+ansible_become_method: enable
+
+# aaa_settings.local_users, not top-level local_users (removed in AVD 6.0.0,
+# renamed silently) -- without it a full-replace push locks out SSH/eAPI.
+aaa_settings:
+  local_users:
+    - name: admin
+      privilege: 15
+      role: network-admin
+      sha512_password: >-
+        $6$MWcCxpFSH1YDvFuO$ntxuhDX4iDCt9DhM/z2hjN5vjsWpfSY0aOL2AFGx4rawtwbAGqOQkvH1aLZFLGUTRRUm6qrK7G3rQ8Lr54TVG/
+
+management_eapi:
+  enabled: true
+  enable_https: true
+  enable_http: false
+
+# cEOSLab's platform profile outranks this for Management0 vs Management1 --
+# every node-type defaults block in fabric_variables.yml also sets it. See
+# docs/decisions.md.
+mgmt_interface_settings:
+  interface: Management0
+mgmt_gateway: 172.40.40.1

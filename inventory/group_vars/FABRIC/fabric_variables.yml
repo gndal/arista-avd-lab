@@ -1,0 +1,89 @@
+---
+# AVD L3LS EVPN-VXLAN reference design: 2 spines, 2 ESI leaf pairs, 1 border
+# pair. eBGP underlay + overlay, spines as route servers. No MLAG anywhere --
+# host redundancy is ESI multihoming (network_services.yml's `servers`
+# block); mlag: false below avoids AVD's default MLAG-pair assumption for a
+# 2-node l3leaf node_group. mgmt_ip values are validated against
+# inventory/site_registry.yml by playbooks/render_lab.yml. See docs/decisions.md.
+
+fabric_name: FABRIC
+
+underlay_routing_protocol: ebgp
+overlay_routing_protocol: ebgp
+overlay_evpn: true
+
+p2p_uplinks_mtu: 9214
+
+spine:
+  defaults:
+    # MUST be cEOSLab exactly -- a near-miss string silently falls back to
+    # the unsupported "default" profile. See docs/decisions.md.
+    platform: cEOSLab
+    # cEOSLab's platform profile sets Management1, outranking all.yml's
+    # setting -- required here too, or a push cuts its own mgmt access.
+    mgmt_interface: Management0
+    bgp_as: 65100
+    loopback_ipv4_pool: 10.255.0.0/24
+    bgp_defaults:
+      - "no bgp default ipv4-unicast"
+  nodes:
+    - name: spine1
+      id: 1
+      mgmt_ip: 172.40.40.11/24
+    - name: spine2
+      id: 2
+      mgmt_ip: 172.40.40.12/24
+
+l3leaf:
+  defaults:
+    platform: cEOSLab
+    mgmt_interface: Management0
+    mlag: false
+    vtep: true
+    spanning_tree_mode: none
+    virtual_router_mac_address: "00:1c:73:00:dc:01"
+    loopback_ipv4_pool: 10.255.2.0/24
+    vtep_loopback_ipv4_pool: 10.255.3.0/24
+    uplink_ipv4_pool: 10.254.0.0/24
+    uplink_switches: [spine1, spine2]
+    uplink_interfaces: [Ethernet1, Ethernet2]
+    bgp_defaults:
+      - "no bgp default ipv4-unicast"
+  node_groups:
+    - group: RACK1
+      bgp_as: 65101
+      nodes:
+        - name: leaf1a
+          id: 1
+          mgmt_ip: 172.40.40.21/24
+          uplink_switch_interfaces: [Ethernet1, Ethernet1]
+        - name: leaf1b
+          id: 2
+          mgmt_ip: 172.40.40.22/24
+          uplink_switch_interfaces: [Ethernet2, Ethernet2]
+
+    - group: RACK2
+      bgp_as: 65102
+      nodes:
+        - name: leaf2a
+          id: 3
+          mgmt_ip: 172.40.40.23/24
+          uplink_switch_interfaces: [Ethernet3, Ethernet3]
+        - name: leaf2b
+          id: 4
+          mgmt_ip: 172.40.40.24/24
+          uplink_switch_interfaces: [Ethernet4, Ethernet4]
+
+    # Redundant pair, but not an ethernet segment -- fw1's handoff is routed,
+    # single-homed to borderleaf1. See network_services.yml, docs/decisions.md.
+    - group: BORDER
+      bgp_as: 65103
+      nodes:
+        - name: borderleaf1
+          id: 5
+          mgmt_ip: 172.40.40.31/24
+          uplink_switch_interfaces: [Ethernet5, Ethernet5]
+        - name: borderleaf2
+          id: 6
+          mgmt_ip: 172.40.40.32/24
+          uplink_switch_interfaces: [Ethernet6, Ethernet6]

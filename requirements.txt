@@ -1,0 +1,17 @@
+# Floor-only, no upper cap -- same pinning policy as the sibling home/avd and
+# home/arista-avd-dc-wan repos. This Windows authoring machine cannot resolve
+# Ansible collection dependency trees locally at all (ansible-galaxy and
+# ansible-lint both fail with OSError WinError 87), so an upper bound here
+# would be a guess. Two such guesses broke home/avd's CI twice in a row --
+# don't add one without a real install confirming it resolves.
+#
+# The containerlab VM's shared ~/avd-venv already satisfies all of this
+# (pyavd 6.3.0, anta 1.9.0, confirmed live 2026-08-24). This file documents
+# what the repo needs; it is not installed per CI job.
+ansible-core>=2.15
+pyavd>=6.3.0
+anta[cli]>=1.9.0
+distlib>=0.3.9
+netaddr
+jsonschema
+pyyaml

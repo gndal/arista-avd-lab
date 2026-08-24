@@ -1,0 +1,10 @@
+collections/
+roles/
+*.retry
+.vault_pass
+.lintvenv/
+containerlab/clab-*/
+containerlab/*.annotations.json
+__pycache__/
+*.pyc
+inventory/anta_inventory.generated.yml

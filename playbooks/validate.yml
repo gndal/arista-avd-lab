@@ -1,0 +1,86 @@
+---
+# Runs the ANTA test catalog against the live fabric -- as a pre-check
+# (before a push) and a post-check (after). See tests/anta_catalog.yml and
+# docs/decisions.md.
+- name: Validate fabric state with ANTA
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    registry: "{{ lookup('file', playbook_dir ~ '/../inventory/site_registry.yml') | from_yaml }}"
+    anta_inventory_file: "{{ playbook_dir }}/../inventory/anta_inventory.generated.yml"
+    anta_catalog_file: "{{ playbook_dir }}/../tests/anta_catalog.yml"
+    anta_user: "{{ lookup('env', 'ANTA_USERNAME') | default('admin', true) }}"
+    anta_password: "{{ lookup('env', 'ANTA_PASSWORD') | default('admin', true) }}"
+  tasks:
+    - name: Build the ANTA host list from the site registry
+      # "fw-uplink" tag added only to registry.firewall.uplinks[0].peer -- see
+      # docs/decisions.md for why "borderleaf" alone isn't enough to scope
+      # fw1-specific tests since fw1 went single-homed.
+      ansible.builtin.set_fact:
+        anta_hosts: >-
+          {{ (anta_hosts | default([])) + [{
+               'name': item.name,
+               'host': item.mgmt,
+               'port': 443,
+               'tags': [item.role] + (['fw-uplink'] if item.name == registry.firewall.uplinks[0].peer else [])
+             }] }}
+      loop: "{{ registry.nodes }}"
+      loop_control:
+        label: "{{ item.name }} ({{ item.role }})"
+
+    - name: Write the generated ANTA inventory
+      ansible.builtin.copy:
+        dest: "{{ anta_inventory_file }}"
+        mode: "0644"
+        content: |
+          # GENERATED at runtime by playbooks/validate.yml -- do not commit.
+          {{ {'anta_inventory': {'hosts': anta_hosts}} | to_nice_yaml(indent=2) }}
+
+    - name: Warm h1-red's MAC/ARP entry on leaf1a for VerifyEVPNType2Route
+      # MAC-table aging withdraws the Type-2 route without recent traffic --
+      # see docs/troubleshooting.md. Sourced from leaf1a specifically, not
+      # its ES-peer leaf1b (see the catalog's VerifyEVPNType2Route comment).
+      ansible.builtin.uri:
+        url: "https://{{ (registry.nodes | selectattr('name', 'equalto', 'leaf1a') | first).mgmt }}/command-api"
+        method: POST
+        user: "{{ anta_user }}"
+        password: "{{ anta_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        body_format: json
+        timeout: 30
+        body:
+          jsonrpc: "2.0"
+          method: runCmds
+          id: 1
+          params:
+            version: 1
+            format: text
+            cmds:
+              - enable
+              - ping vrf VRF_RED 10.10.110.101 source Vlan110 repeat 2
+      failed_when: false
+      changed_when: false
+
+    - name: Run the ANTA NRFU test catalog
+      # Credentials via env, not --username/--password (visible in `ps`/logs).
+      # --enable required for VerifyReachability's ping.
+      ansible.builtin.command:
+        cmd: >-
+          anta nrfu
+          --insecure
+          --enable
+          --inventory {{ anta_inventory_file }}
+          --catalog {{ anta_catalog_file }}
+          text
+      environment:
+        ANTA_USERNAME: "{{ anta_user }}"
+        ANTA_PASSWORD: "{{ anta_password }}"
+      register: anta_result
+      changed_when: false
+      failed_when: anta_result.rc != 0
+
+    - name: Show ANTA results
+      ansible.builtin.debug:
+        var: anta_result.stdout_lines

@@ -1,0 +1,16 @@
+# This repo is authored on Windows but consumed entirely on Linux -- the
+# containerlab VM runs the playbooks, containerlab reads the day-0 template,
+# and GitLab CI lints the YAML on a Linux runner.
+#
+# Without this, Git stored CRLF in the blobs, and a checkout on Linux (where
+# core.autocrlf is unset) wrote them back out as CRLF. yamllint fails every
+# such file with "wrong new line character: expected \n".
+#
+# Normalise everything to LF in the repository. Windows working copies are
+# unaffected in practice -- every editor here handles LF.
+* text=auto eol=lf
+
+# Rendered device configs and the day-0 boot template are fed to EOS and to
+# containerlab on Linux; they must be LF.
+*.cfg   text eol=lf
+*.tmpl  text eol=lf

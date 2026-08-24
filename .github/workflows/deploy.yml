@@ -1,0 +1,73 @@
+name: Deploy to Fabric
+# Self-hosted, push-to-main-only -- never triggered by pull_request, so a fork
+# PR can never reach this runner regardless of workflow content. See
+# docs/decisions.md. Mirrors .gitlab-ci.yml's precheck/push/postcheck. No
+# rollback job, matching the GitLab pipeline's own removal of automatic rollback.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fabric-deploy
+  cancel-in-progress: false
+
+jobs:
+  precheck:
+    runs-on: [self-hosted, containerlab]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false  # containerlab writes root-owned runtime files under
+                         # containerlab/clab-*/ while the lab is up.
+      - name: Sanity-check the shared AVD venv
+        run: test -f ~/avd-venv/bin/activate || { echo "~/avd-venv is missing on this runner host -- see README.md"; exit 1; }
+      - name: Bring the lab up if not already running, render config
+        run: |
+          source ~/avd-venv/bin/activate
+          docker image inspect frr-firewall:1 >/dev/null 2>&1 || docker build -t frr-firewall:1 containerlab/frr-firewall/
+          if ! containerlab inspect -t containerlab/topology.clab.yml >/dev/null 2>&1; then
+            sudo containerlab deploy -t containerlab/topology.clab.yml
+          fi
+          ansible-playbook -i inventory/inventory.yml playbooks/build.yml
+      - name: Run ANTA pre-check
+        run: |
+          source ~/avd-venv/bin/activate
+          ansible-playbook -i inventory/inventory.yml playbooks/validate.yml
+        env:
+          ANTA_USERNAME: ${{ secrets.EOS_USERNAME }}
+          ANTA_PASSWORD: ${{ secrets.EOS_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: intended-configs
+          path: inventory/intended/configs/
+          retention-days: 7
+
+  push:
+    needs: precheck
+    runs-on: [self-hosted, containerlab]
+    steps:
+      - uses: actions/checkout@v4
+        with: {clean: false}
+      - name: Commit-confirm push
+        run: |
+          source ~/avd-venv/bin/activate
+          export ANSIBLE_HOST_KEY_CHECKING="False"
+          ansible-playbook -i inventory/inventory.yml playbooks/deploy_confirm.yml
+
+  postcheck:
+    needs: push
+    runs-on: [self-hosted, containerlab]
+    steps:
+      - uses: actions/checkout@v4
+        with: {clean: false}
+      - name: ANTA + dataplane verification
+        run: |
+          source ~/avd-venv/bin/activate
+          ansible-playbook -i inventory/inventory.yml playbooks/validate.yml
+          ansible-playbook playbooks/verify_dataplane.yml
+        env:
+          ANTA_USERNAME: ${{ secrets.EOS_USERNAME }}
+          ANTA_PASSWORD: ${{ secrets.EOS_PASSWORD }}

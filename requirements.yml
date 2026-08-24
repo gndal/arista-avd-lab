@@ -1,0 +1,11 @@
+---
+# Floor-only, no upper cap -- see requirements.txt for why.
+collections:
+  - name: arista.avd
+    version: ">=6.3.0"
+  - name: arista.eos
+    version: ">=6.0.0"
+  - name: ansible.netcommon
+    version: ">=5.0.0"
+  - name: ansible.utils
+    version: ">=5.0.0"

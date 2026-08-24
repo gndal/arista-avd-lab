@@ -1,0 +1,15 @@
+---
+# Render-only -- never touches a device. Run this first, always, and review
+# inventory/intended/configs/*.cfg before pushing anything.
+- name: Build intended configuration
+  hosts: FABRIC
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Generate structured configuration
+      ansible.builtin.import_role:
+        name: arista.avd.eos_designs
+
+    - name: Generate device configuration
+      ansible.builtin.import_role:
+        name: arista.avd.eos_cli_config_gen

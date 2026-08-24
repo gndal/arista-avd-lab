@@ -1,0 +1,81 @@
+! Day-0 (boot) configuration for every cEOS node in this lab.
+!
+! WHY THIS FILE EXISTS -- read before editing.
+!
+! AVD's rendered config puts the OOB management interface and the eAPI
+! listener in `vrf MGMT` (AVD's default, and normal practice on real
+! fabrics). containerlab's own generated cEOS boot config instead leaves
+! Management0 and eAPI in the *default* VRF.
+!
+! That mismatch makes the very first push after a cold boot cut the branch it
+! is sitting on: the config session moves Management0 into vrf MGMT, which
+! destroys every TCP socket on that interface -- including the eAPI
+! connection Ansible is delivering the config over. The device commits the
+! config just fine, but the HTTP response can never reach Ansible, so the
+! task blocks until the command timeout and reports a false failure on a host
+! that actually succeeded.
+!
+! This was proven live on the sibling home/arista-avd-dc-wan repo with a
+! controlled A/B on one host, same playbook and config both times:
+!   1st push (Management0 default VRF -> vrf MGMT):  47.6s, TIMEOUT
+!   2nd push (VRF already correct, nothing moves):    3.9s, SUCCESS
+!
+! Pre-staging the management plane here is the day-0/ZTP equivalent of what a
+! real deployment does: the management transport exists before the automation
+! ever connects, so AVD's push is a no-op for it. Everything below the
+! management plane is deliberately left alone -- the AVD push owns the rest of
+! the device.
+!
+! Templated by containerlab (Go template, node object as context) so one file
+! serves all eight cEOS nodes: `.ShortName` / `.MgmtIPv4Address` /
+! `.MgmtIPv4PrefixLength` come from the node's own topology entry, so mgmt IPs
+! stay defined in exactly one place (inventory/site_registry.yml, via the
+! generated topology.clab.yml) rather than being duplicated per node here.
+!
+! The default-route gateway below is the one value that cannot come from the
+! Go template context, so playbooks/render_lab.yml asserts it matches the
+! registry's mgmt.gateway instead.
+!
+no aaa root
+!
+! Matches aaa_settings.local_users in inventory/group_vars/all.yml
+! (admin/admin) so the push does not churn the account it is logged in as.
+username admin privilege 15 role network-admin secret sha512 $6$MWcCxpFSH1YDvFuO$ntxuhDX4iDCt9DhM/z2hjN5vjsWpfSY0aOL2AFGx4rawtwbAGqOQkvH1aLZFLGUTRRUm6qrK7G3rQ8Lr54TVG/
+!
+! Must match what AVD renders (management_eapi: https only, in vrf MGMT)
+! exactly -- any difference here is a change the first push has to apply to
+! the live management transport, which is the whole problem this file exists
+! to avoid.
+management api http-commands
+   protocol https
+   no protocol http
+   no shutdown
+   !
+   vrf MGMT
+      no shutdown
+!
+! Kept from containerlab's own generated boot config: changing the routing
+! protocol model on EOS is reload-affecting, so it must already be correct at
+! boot rather than arriving in the AVD push.
+no service interface inactive port-id allocation disabled
+!
+service routing protocols model multi-agent
+!
+hostname {{ .ShortName }}
+!
+system l1
+   unsupported speed action error
+   unsupported error-correction action error
+!
+vrf instance MGMT
+!
+interface Management0
+   description OOB_MANAGEMENT
+   vrf MGMT
+   ip address {{ .MgmtIPv4Address }}/{{ .MgmtIPv4PrefixLength }}
+!
+no ip routing vrf MGMT
+!
+ip route vrf MGMT 0.0.0.0/0 172.40.40.1
+!
+end

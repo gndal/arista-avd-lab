@@ -1,0 +1,140 @@
+# GitLab CI for home/eos-avd-anta-dc (project id 6 on 192.168.1.130).
+#
+# MR pipeline:   lint -> drift -> render-and-diff (posts the diff as an MR note)
+# main pipeline: precheck (ANTA) -> push (commit-confirm) -> postcheck (ANTA + dataplane)
+#
+# No automatic rollback -- a postcheck failure just fails the pipeline;
+# recovery is manual. deploy_confirm.yml's own commit-confirm timer is the
+# only automatic safety net (device-level, self-reverts if a push cuts its
+# own management access -- see docs/decisions.md).
+#
+# All jobs run on `containerlab-shell-runner` (shell executor on the
+# containerlab VM, 192.168.1.132, tag `containerlab`) -- the fabric's mgmt
+# network is only reachable from that host.
+
+variables:
+  # `clone` does a full rm -rf before every job; containerlab writes
+  # root-owned runtime files inside the repo while the lab is up, which can
+  # break that. `fetch` + excluding those paths avoids it.
+  GIT_STRATEGY: fetch
+  GIT_CLEAN_FLAGS: "-ffdx -e containerlab/clab-* -e .lintvenv/"
+
+stages:
+  - lint
+  - render
+  - precheck
+  - push
+  - postcheck
+
+.avd_venv: &avd_venv
+  - test -f ~/avd-venv/bin/activate || { echo "~/avd-venv is missing on this runner host -- see README.md"; exit 1; }
+  - source ~/avd-venv/bin/activate
+
+lint:
+  stage: lint
+  tags: [containerlab]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - test -d .lintvenv || python3 -m venv .lintvenv
+    - ./.lintvenv/bin/pip install -q --upgrade yamllint ansible-lint
+    - ./.lintvenv/bin/yamllint .
+    - ./.lintvenv/bin/ansible-lint
+
+drift:
+  stage: render
+  tags: [containerlab]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - *avd_venv
+    - ansible-playbook playbooks/render_lab.yml --check --diff
+
+render-and-diff:
+  stage: render
+  tags: [containerlab]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - *avd_venv
+    - ansible-playbook -i inventory/inventory.yml playbooks/build.yml
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - |
+      if ! git diff --quiet -- inventory/intended/; then
+        echo "ERROR: re-rendering changed inventory/intended/ -- the committed render is stale."
+        echo "Run: ansible-playbook -i inventory/inventory.yml playbooks/build.yml, then commit."
+        git diff --stat -- inventory/intended/
+        exit 1
+      fi
+    - DIFF_FILE="/tmp/render-diff-$CI_PIPELINE_ID.txt"
+    - COMMENT_FILE="/tmp/mr-comment-$CI_PIPELINE_ID.json"
+    - git diff "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" -- inventory/intended/configs/ > "$DIFF_FILE" || true
+    - |
+      python3 - "$DIFF_FILE" "$COMMENT_FILE" <<'PY'
+      import json, sys
+      diff = open(sys.argv[1]).read()
+      if diff.strip():
+          body = "### Rendered config diff\n\n```diff\n" + diff + "\n```"
+      else:
+          body = "### Rendered config diff\n\nNo changes to device configuration."
+      json.dump({"body": body}, open(sys.argv[2], "w"))
+      PY
+    - echo "----- rendered config diff -----"; cat "$DIFF_FILE"; echo "--------------------------------"
+    # GITLAB_API_TOKEN (masked CI/CD var) needed for MR-notes permission --
+    # CI_JOB_TOKEN alone doesn't carry it on this instance.
+    - |
+      if [ -n "$GITLAB_API_TOKEN" ]; then
+        curl --silent --show-error --fail \
+          --header "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
+          --header "Content-Type: application/json" \
+          --data @"$COMMENT_FILE" \
+          "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+      else
+        echo "GITLAB_API_TOKEN not set -- skipping MR comment, diff is in this job's log."
+      fi
+    - rm -f "$DIFF_FILE" "$COMMENT_FILE"
+
+precheck:
+  stage: precheck
+  tags: [containerlab]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - *avd_venv
+    - docker image inspect frr-firewall:1 >/dev/null 2>&1 || docker build -t frr-firewall:1 containerlab/frr-firewall/
+    # Bring the lab up if not already running -- see docs/LLD.md's known-gaps
+    # note on cold-deploy boot contention.
+    - |
+      if ! containerlab inspect -t containerlab/topology.clab.yml >/dev/null 2>&1; then
+        sudo containerlab deploy -t containerlab/topology.clab.yml
+      fi
+    - ansible-playbook -i inventory/inventory.yml playbooks/build.yml
+    - export ANTA_USERNAME="$EOS_USERNAME" ANTA_PASSWORD="$EOS_PASSWORD"
+    - ansible-playbook -i inventory/inventory.yml playbooks/validate.yml
+  artifacts:
+    paths:
+      - inventory/intended/configs/
+    expire_in: 1 week
+
+push:
+  stage: push
+  tags: [containerlab]
+  resource_group: fabric
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - *avd_venv
+    - export ANSIBLE_HOST_KEY_CHECKING="False"
+    - ansible-playbook -i inventory/inventory.yml playbooks/deploy_confirm.yml
+
+postcheck:
+  stage: postcheck
+  tags: [containerlab]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - *avd_venv
+    - export ANTA_USERNAME="$EOS_USERNAME" ANTA_PASSWORD="$EOS_PASSWORD"
+    - ansible-playbook -i inventory/inventory.yml playbooks/validate.yml
+    - ansible-playbook playbooks/verify_dataplane.yml

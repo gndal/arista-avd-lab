@@ -1,0 +1,75 @@
+---
+# End-to-end dataplane proof via `docker exec` -- ANTA only sees EOS control
+# plane, not what hosts/firewall actually experience. See docs/verification.md.
+#
+#   ansible-playbook playbooks/verify_dataplane.yml
+#
+# 1. h1-red -> h2-red   ping  same VRF, cross-rack, pure EVPN-VXLAN
+# 2. h1-red -> h1-blue  ping  cross-VRF via fw1               MUST PASS
+# 3. h1-red -> h1-blue  TCP   cross-VRF via fw1               MUST FAIL (nftables permits ICMP only)
+# 4. h1-red -> h2-red   TCP   same-VRF control, proves the listener works
+- name: Prove the dataplane end to end (docker exec, not ANTA)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    registry: "{{ lookup('file', playbook_dir ~ '/../inventory/site_registry.yml') | from_yaml }}"
+    lab: "{{ registry.lab.name }}"
+    h1_red: "{{ registry.hosts | selectattr('name', 'equalto', 'h1-red') | first }}"
+    h1_blue: "{{ registry.hosts | selectattr('name', 'equalto', 'h1-blue') | first }}"
+    h2_red: "{{ registry.hosts | selectattr('name', 'equalto', 'h2-red') | first }}"
+
+  tasks:
+    - name: "[1/4] Intra-VRF cross-rack ping (h1-red -> h2-red, pure EVPN-VXLAN)"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec clab-{{ lab }}-h1-red
+          ping -c 4 -W 2 {{ h2_red.ip.split('/')[0] }}
+      register: ping_same_vrf
+      changed_when: false
+      failed_when: "'4 packets transmitted, 4 packets received' not in ping_same_vrf.stdout"
+
+    - name: "[2/4] Inter-VRF ping (h1-red -> h1-blue, via fw1) -- must pass"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec clab-{{ lab }}-h1-red
+          ping -c 4 -W 2 {{ h1_blue.ip.split('/')[0] }}
+      register: ping_cross_vrf
+      changed_when: false
+      failed_when: "'4 packets transmitted, 4 packets received' not in ping_cross_vrf.stdout"
+
+    - name: "[3/4] Inter-VRF TCP (h1-red -> h1-blue:8080) -- must FAIL"
+      # -w is nc's total timeout; the outer timeout is a hang guard for a
+      # dropped (not rejected) connection.
+      ansible.builtin.command:
+        cmd: >-
+          docker exec clab-{{ lab }}-h1-red
+          timeout 5 nc -zv -w 3 {{ h1_blue.ip.split('/')[0] }} 8080
+      register: tcp_cross_vrf
+      changed_when: false
+      failed_when: false  # non-zero rc is the expected outcome; asserted below
+
+    - name: "[3/4] Assert the TCP connection was actually blocked, not just slow"
+      ansible.builtin.assert:
+        that: tcp_cross_vrf.rc != 0
+        fail_msg: >-
+          h1-red reached h1-blue:8080 over TCP -- nftables on fw1 is not
+          filtering. Check containerlab/frr-firewall/nftables.conf and that
+          it was actually loaded (see entrypoint.sh).
+
+    - name: "[4/4] Control: intra-VRF TCP (h1-red -> h2-red:8080) -- must pass"
+      ansible.builtin.command:
+        cmd: >-
+          docker exec clab-{{ lab }}-h1-red
+          timeout 5 nc -zv -w 3 {{ h2_red.ip.split('/')[0] }} 8080
+      register: tcp_same_vrf
+      changed_when: false
+      failed_when: tcp_same_vrf.rc != 0
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "[1/4] intra-VRF ping (h1-red -> h2-red):        PASS"
+          - "[2/4] inter-VRF ping (h1-red -> h1-blue):        PASS"
+          - "[3/4] inter-VRF TCP (h1-red -> h1-blue:8080):    BLOCKED (expected)"
+          - "[4/4] intra-VRF TCP control (h1-red -> h2-red):  PASS"

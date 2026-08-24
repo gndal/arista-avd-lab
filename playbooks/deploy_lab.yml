@@ -1,0 +1,10 @@
+---
+# One-shot full-config push for quick manual iteration. Run playbooks/build.yml
+# first. CI does not use this -- see playbooks/deploy_confirm.yml and
+# docs/decisions.md.
+- name: Push AVD intended config to the containerlab lab
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Push the rendered configuration
+      ansible.builtin.import_tasks: ../tasks/push_config.yml

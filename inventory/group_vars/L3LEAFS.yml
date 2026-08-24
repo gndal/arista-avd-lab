@@ -1,0 +1,4 @@
+---
+# Leaf + borderleaf are both `type: l3leaf` to eos_designs. Borderleaf-only
+# config lives in group_vars/BORDERLEAFS.yml instead -- see its header.
+type: l3leaf

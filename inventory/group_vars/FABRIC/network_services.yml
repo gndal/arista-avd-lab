@@ -1,0 +1,116 @@
+---
+# Two tenants, both present on all six l3leaf nodes. fw1 handoff, single-homed
+# to borderleaf1, VRF policy objects, and MUST-be-set svis.enabled: see
+# docs/LLD.md and docs/decisions.md.
+
+tenants:
+  - name: Tenant_Red
+    mac_vrf_vni_base: 10000
+    vrfs:
+      - name: VRF_RED
+        vrf_vni: 10
+        vtep_diagnostic:
+          loopback: 100
+          loopback_ip_range: 10.255.100.0/24
+        svis:
+          - id: 110
+            name: RED_App
+            enabled: true
+            ip_address_virtual: 10.10.110.1/24
+        l3_interfaces:
+          - description: "fw1 VRF_RED transit"
+            interfaces: [Ethernet3.3110]
+            nodes: [borderleaf1]
+            ip_addresses: [10.255.10.0/31]
+            encapsulation_dot1q_vlan: [3110]
+            enabled: true
+        bgp_peers:
+          - ip_address: 10.255.10.1
+            remote_as: 65500
+            description: "fw1 (VRF_RED)"
+            nodes: [borderleaf1]
+            route_map_in: RM-FW-IN
+            route_map_out: RM-FW-OUT
+            maximum_routes: 100
+            maximum_routes_warning_only: true
+
+  - name: Tenant_Blue
+    mac_vrf_vni_base: 20000
+    vrfs:
+      - name: VRF_BLUE
+        vrf_vni: 20
+        vtep_diagnostic:
+          loopback: 101
+          loopback_ip_range: 10.255.101.0/24
+        svis:
+          - id: 120
+            name: BLUE_App
+            enabled: true
+            ip_address_virtual: 10.20.120.1/24
+        l3_interfaces:
+          - description: "fw1 VRF_BLUE transit"
+            interfaces: [Ethernet3.3120]
+            nodes: [borderleaf1]
+            ip_addresses: [10.255.20.0/31]
+            encapsulation_dot1q_vlan: [3120]
+            enabled: true
+        bgp_peers:
+          - ip_address: 10.255.20.1
+            remote_as: 65500
+            description: "fw1 (VRF_BLUE)"
+            nodes: [borderleaf1]
+            route_map_in: RM-FW-IN
+            route_map_out: RM-FW-OUT
+            maximum_routes: 100
+            maximum_routes_warning_only: true
+
+# EVPN ESI multihoming for the test hosts. short_esi: auto ties each pair's
+# leaf-side ports to a shared ESI/LACP system-id -- see docs/decisions.md.
+servers:
+  - name: h1-red
+    adapters:
+      - endpoint_ports: [eth1, eth2]
+        switch_ports: [Ethernet3, Ethernet3]
+        switches: [leaf1a, leaf1b]
+        port_channel:
+          mode: active
+        ethernet_segment:
+          short_esi: auto
+        mode: access
+        vlans: "110"
+
+  - name: h1-blue
+    adapters:
+      - endpoint_ports: [eth1, eth2]
+        switch_ports: [Ethernet4, Ethernet4]
+        switches: [leaf1a, leaf1b]
+        port_channel:
+          mode: active
+        ethernet_segment:
+          short_esi: auto
+        mode: access
+        vlans: "120"
+
+  - name: h2-red
+    adapters:
+      - endpoint_ports: [eth1, eth2]
+        switch_ports: [Ethernet3, Ethernet3]
+        switches: [leaf2a, leaf2b]
+        port_channel:
+          mode: active
+        ethernet_segment:
+          short_esi: auto
+        mode: access
+        vlans: "110"
+
+  - name: h2-blue
+    adapters:
+      - endpoint_ports: [eth1, eth2]
+        switch_ports: [Ethernet4, Ethernet4]
+        switches: [leaf2a, leaf2b]
+        port_channel:
+          mode: active
+        ethernet_segment:
+          short_esi: auto
+        mode: access
+        vlans: "120"

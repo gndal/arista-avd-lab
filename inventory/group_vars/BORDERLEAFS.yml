@@ -1,0 +1,53 @@
+---
+# Borderleaf-only config (route-maps, ACL, AS-path list) for the fw1 handoff.
+# Real Ansible child group of L3LEAFS, not an avd_group -- see
+# templates/inventory.yml.j2. Rationale for the split, wiring mechanisms, and
+# live verification: docs/decisions.md, docs/LLD.md, docs/verification.md.
+# ACL-FW-TRANSIT-IN's push-ordering issue: docs/troubleshooting.md.
+
+custom_structured_configuration_route_maps:
+  # route_map_in on the fw1 peers: tags/de-preferences routes learned from fw1.
+  - name: RM-FW-IN
+    sequence_numbers:
+      - sequence: 10
+        type: permit
+        set:
+          - "community 65103:100 additive"
+          - "local-preference 80"
+
+  # route_map_out on the fw1 peers: only advertise self-originated routes.
+  - name: RM-FW-OUT
+    sequence_numbers:
+      - sequence: 10
+        type: permit
+        match:
+          - "as-path ASPATH-LOCAL-ONLY"
+
+custom_structured_configuration_as_path:
+  access_lists:
+    - name: ASPATH-LOCAL-ONLY
+      entries:
+        - type: permit
+          match: "^$"
+
+ipv4_acls:
+  # Defined but not referenced -- see docs/troubleshooting.md.
+  - name: ACL-FW-TRANSIT-IN
+    counters_per_entry: true
+    entries:
+      - sequence: 10
+        action: permit
+        protocol: tcp
+        source: any
+        destination: any
+        destination_ports: ["179"]
+      - sequence: 20
+        action: permit
+        protocol: icmp
+        source: any
+        destination: any
+      - sequence: 900
+        action: permit
+        protocol: ip
+        source: any
+        destination: any

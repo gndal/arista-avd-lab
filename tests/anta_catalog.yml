@@ -1,0 +1,114 @@
+---
+# ANTA NRFU catalog. Run via playbooks/validate.yml as pre-check (before a
+# push) and post-check (after). Devices are tagged by registry `role` plus
+# "fw-uplink" for the one borderleaf with the fw1 uplink -- see
+# playbooks/validate.yml.
+#
+# One key per `anta.tests.X:` module -- YAML silently drops earlier
+# duplicate top-level keys. Every test here has been run against the live
+# fabric; non-obvious gotchas are in docs/troubleshooting.md.
+
+anta.tests.interfaces:
+  - VerifyInterfacesStatus:
+      filters:
+        tags: ["spine", "leaf", "borderleaf"]
+      interfaces:
+        - name: Ethernet1
+          status: up
+        - name: Ethernet2
+          status: up
+
+  # fw-uplink, not "borderleaf" -- fw1 is single-homed, see docs/decisions.md.
+  - VerifyInterfacesStatus:
+      filters:
+        tags: ["fw-uplink"]
+      interfaces:
+        - name: Ethernet3
+          status: up
+
+  - VerifyPortChannels:
+      filters:
+        tags: ["leaf"]
+
+  # name = member interface, portchannel = the bundle -- see docs/troubleshooting.md.
+  - VerifyLACPInterfacesStatus:
+      filters:
+        tags: ["leaf"]
+      interfaces:
+        - name: Ethernet3
+          portchannel: Port-Channel3
+        - name: Ethernet4
+          portchannel: Port-Channel4
+
+  - VerifySVI:
+      filters:
+        tags: ["leaf", "borderleaf"]
+
+  - VerifyIpVirtualRouterMac:
+      filters:
+        tags: ["leaf", "borderleaf"]
+      mac_address: 00:1c:73:00:dc:01
+
+anta.tests.routing.bgp:
+  - VerifyBGPPeersHealth:
+      filters:
+        tags: ["spine", "leaf", "borderleaf"]
+      address_families:
+        - afi: ipv4
+          safi: unicast
+        - afi: evpn
+
+  - VerifyBGPPeersHealth:
+      filters:
+        tags: ["fw-uplink"]
+      address_families:
+        - afi: ipv4
+          safi: unicast
+          vrf: VRF_RED
+        - afi: ipv4
+          safi: unicast
+          vrf: VRF_BLUE
+
+  # Spine-only: EVPN local-bias means an ES-peer doesn't import Type-2 for
+  # its own shared-ES host -- see docs/troubleshooting.md.
+  - VerifyEVPNType2Route:
+      filters:
+        tags: ["spine"]
+      vxlan_endpoints:
+        - address: 10.10.110.101
+          vni: 10
+
+anta.tests.vxlan:
+  - VerifyVxlan1Interface:
+      filters:
+        tags: ["leaf", "borderleaf"]
+
+  - VerifyVxlanConfigSanity:
+      filters:
+        tags: ["leaf", "borderleaf"]
+
+  # L2 VNI -> VLAN id (int); L3 VNI -> VRF name (str) -- see docs/troubleshooting.md.
+  - VerifyVxlanVniBinding:
+      filters:
+        tags: ["leaf", "borderleaf"]
+      bindings:
+        10110: 110
+        20120: 120
+        10: VRF_RED
+        20: VRF_BLUE
+
+anta.tests.connectivity:
+  # No leaf-to-local-host reachability here -- switch-CPU pings to an
+  # ES-multihomed host are hash-dependent and unreliable; real host
+  # reachability is proven by playbooks/verify_dataplane.yml instead. See
+  # docs/troubleshooting.md.
+  - VerifyReachability:
+      filters:
+        tags: ["fw-uplink"]
+      hosts:
+        - source: Ethernet3.3110
+          destination: 10.255.10.1
+          vrf: VRF_RED
+        - source: Ethernet3.3120
+          destination: 10.255.20.1
+          vrf: VRF_BLUE

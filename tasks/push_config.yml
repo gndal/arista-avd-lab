@@ -1,0 +1,17 @@
+---
+# Shared task: push via eos_config's atomic replace:config mode (opens,
+# applies, and commits in one call -- no confirm/abort step).
+- name: Apply rendered configuration
+  arista.eos.eos_config:
+    src: "{{ push_config_src | default('../inventory/intended/configs/' ~ inventory_hostname ~ '.cfg') }}"
+    replace: config
+  vars:
+    ansible_command_timeout: 240
+
+# Split from the apply above -- save_when: changed on the combined task
+# reliably timed out at 240s across all hosts; see docs/troubleshooting.md.
+- name: Save running-config to startup-config
+  arista.eos.eos_config:
+    save_when: always
+  vars:
+    ansible_command_timeout: 60

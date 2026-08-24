@@ -1,0 +1,167 @@
+---
+# Push via an EOS config session guarded by a commit timer, confirmed only if
+# the device is still reachable after. Default push path in this repo (CI's
+# `push` stage runs this) -- see docs/decisions.md for why, and for the
+# verified happy/failure-path behavior.
+#
+#   ansible-playbook -i inventory/inventory.yml playbooks/deploy_confirm.yml
+#   ansible-playbook -i inventory/inventory.yml playbooks/deploy_confirm.yml -e commit_timer=00:10:00
+- name: Push configuration with commit-confirm
+  hosts: all
+  gather_facts: false
+  connection: local
+  vars:
+    commit_timer: "00:05:00"
+    settle_seconds: 10
+    config_src: "{{ playbook_dir }}/../inventory/intended/configs/{{ inventory_hostname }}.cfg"
+    eapi_url: "https://{{ ansible_host }}/command-api"
+
+  tasks:
+    - name: Pin a unique session name for this run
+      # Must be set_fact, not a play var -- a vars: lookup re-evaluates on
+      # every reference, so apply and confirm could compute different names
+      # a second apart. See docs/troubleshooting.md.
+      ansible.builtin.set_fact:
+        session_name: "AVD_{{ lookup('pipe', 'date +%s') }}_{{ inventory_hostname | replace('-', '_') }}"
+
+    - name: Read the rendered configuration
+      ansible.builtin.set_fact:
+        config_lines: >-
+          {{ lookup('file', config_src).splitlines()
+             | map('regex_replace', '\s+$', '')
+             | reject('match', '^\s*!\s*$')
+             | reject('match', '^\s*$')
+             | reject('match', '^end$')
+             | list }}
+
+    - name: Apply the configuration in a session, armed to revert
+      ansible.builtin.uri:
+        url: "{{ eapi_url }}"
+        method: POST
+        user: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ ansible_httpapi_validate_certs | default(false) }}"
+        body_format: json
+        timeout: 120
+        body:
+          jsonrpc: "2.0"
+          method: runCmds
+          id: 1
+          params:
+            version: 1
+            format: text
+            cmds: >-
+              {{ ['enable',
+                  'configure session ' ~ session_name,
+                  'rollback clean-config']
+                 + config_lines
+                 + ['commit timer ' ~ commit_timer] }}
+      register: apply_result
+      # A transport failure here is expected if the config cut our own
+      # connection -- must not be treated as "nothing happened".
+      failed_when: false
+
+    - name: Decide whether the apply actually succeeded
+      # eAPI signals command failure as a JSON-RPC error with HTTP 200.
+      ansible.builtin.set_fact:
+        apply_ok: >-
+          {{ apply_result.status | default(0) == 200
+             and apply_result.json.error is not defined }}
+
+    - name: Report an apply that did not return cleanly
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: apply did not return cleanly
+          ({{ apply_result.json.error.message | default(apply_result.msg) | default('unknown error') }}).
+          The commit may still have landed -- NOT confirming. The device will
+          revert itself when the {{ commit_timer }} timer expires.
+      when: not apply_ok
+
+    - name: Wait for the control plane to settle
+      ansible.builtin.pause:
+        seconds: "{{ settle_seconds }}"
+      when: apply_ok
+
+    - name: Check the device is still reachable
+      ansible.builtin.uri:
+        url: "{{ eapi_url }}"
+        method: POST
+        user: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ ansible_httpapi_validate_certs | default(false) }}"
+        body_format: json
+        timeout: 30
+        body:
+          jsonrpc: "2.0"
+          method: runCmds
+          id: 1
+          params:
+            version: 1
+            format: text
+            cmds: ["enable", "show hostname"]
+      register: reachable
+      failed_when: false
+      when: apply_ok
+
+    - name: Confirm the commit
+      ansible.builtin.uri:
+        url: "{{ eapi_url }}"
+        method: POST
+        user: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ ansible_httpapi_validate_certs | default(false) }}"
+        body_format: json
+        timeout: 60
+        body:
+          jsonrpc: "2.0"
+          method: runCmds
+          id: 1
+          params:
+            version: 1
+            format: text
+            cmds: ["enable", "configure session {{ session_name }} commit"]
+      register: confirmed
+      when:
+        - not reachable is skipped
+        - reachable.status | default(0) == 200
+        - reachable.json.error is not defined
+
+    - name: Save running-config to startup-config
+      # Only after a confirmed commit -- saving a config about to revert
+      # would defeat the mechanism.
+      ansible.builtin.uri:
+        url: "{{ eapi_url }}"
+        method: POST
+        user: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ ansible_httpapi_validate_certs | default(false) }}"
+        body_format: json
+        timeout: 60
+        body:
+          jsonrpc: "2.0"
+          method: runCmds
+          id: 1
+          params:
+            version: 1
+            format: text
+            cmds: ["enable", "copy running-config startup-config"]
+      when:
+        - not confirmed is skipped
+        - confirmed.status | default(0) == 200
+        - confirmed.json.error is not defined
+
+    - name: Fail the host if it was not confirmed
+      ansible.builtin.fail:
+        msg: >-
+          {{ inventory_hostname }}: NOT confirmed. The device is armed to revert
+          when its {{ commit_timer }} commit timer expires -- do not push again
+          until it has, or the second push will collide with the pending
+          session. Check `show configuration sessions` on the device.
+      when: >-
+        confirmed is skipped
+        or confirmed.status | default(0) != 200
+        or confirmed.json.error is defined

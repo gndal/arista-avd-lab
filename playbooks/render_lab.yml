@@ -1,0 +1,216 @@
+---
+# Generates containerlab/topology.clab.yml and inventory/inventory.yml from
+# inventory/site_registry.yml, and validates the AVD group_vars against it.
+# See docs/decisions.md for why some files are generated and others only
+# validated.
+#
+#   ansible-playbook playbooks/render_lab.yml                  write the files
+#   ansible-playbook playbooks/render_lab.yml --check --diff    drift gate (CI)
+- name: Render lab topology and inventory from the site registry
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    repo: "{{ playbook_dir | dirname }}"
+    registry: "{{ lookup('file', playbook_dir ~ '/../inventory/site_registry.yml') | from_yaml }}"
+    mgmt_prefix: "{{ registry.mgmt.subnet.split('/')[1] }}"
+    l3leaf_roles: [leaf, borderleaf]
+
+  tasks:
+    # ------------------------------------------------------------- validate
+    - name: Read the AVD fabric variables and network services
+      ansible.builtin.set_fact:
+        fabric_vars: "{{ lookup('file', repo ~ '/inventory/group_vars/' ~ registry.lab.fabric ~ '/fabric_variables.yml') | from_yaml }}"
+        svc: "{{ lookup('file', repo ~ '/inventory/group_vars/' ~ registry.lab.fabric ~ '/network_services.yml') | from_yaml }}"
+
+    - name: Every avd_group referenced by the registry has a group_vars file
+      ansible.builtin.stat:
+        path: "{{ repo }}/inventory/group_vars/{{ item }}.yml"
+      register: group_var_files
+      loop: "{{ registry.nodes | map(attribute='avd_group') | unique | list }}"
+
+    - name: Fail if a group_vars file is missing
+      ansible.builtin.assert:
+        that: item.stat.exists
+        fail_msg: >-
+          The registry references avd_group '{{ item.item }}', but
+          inventory/group_vars/{{ item.item }}.yml does not exist.
+      loop: "{{ group_var_files.results }}"
+      loop_control:
+        label: "{{ item.item }}.yml"
+
+    - name: Flatten the AVD node definitions into one map keyed by name
+      ansible.builtin.set_fact:
+        avd_nodes: >-
+          {{ avd_nodes | default({}) | combine({item.name: item}) }}
+      loop: >-
+        {{ fabric_vars.spine.nodes
+           + (fabric_vars.l3leaf.node_groups | map(attribute='nodes') | flatten) }}
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Map each l3leaf to the node_group it is declared in
+      ansible.builtin.set_fact:
+        avd_node_groups: >-
+          {{ avd_node_groups | default({}) | combine({item.1.name: item.0.group}) }}
+      loop: "{{ fabric_vars.l3leaf.node_groups | subelements('nodes') }}"
+      loop_control:
+        label: "{{ item.1.name }} -> {{ item.0.group }}"
+
+    - name: Registry and AVD group_vars agree on every node
+      ansible.builtin.assert:
+        that:
+          - item.name in avd_nodes
+          - avd_nodes[item.name].id == item.id
+          - avd_nodes[item.name].mgmt_ip == item.mgmt ~ '/' ~ mgmt_prefix
+        fail_msg: >-
+          Node '{{ item.name }}' disagrees between inventory/site_registry.yml
+          and group_vars/{{ registry.lab.fabric }}/fabric_variables.yml.
+          Registry says id={{ item.id }} mgmt={{ item.mgmt }}/{{ mgmt_prefix }};
+          AVD says {{ avd_nodes[item.name] | default('(absent)') }}.
+      loop: "{{ registry.nodes }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Registry and AVD group_vars agree on l3leaf cabling and node_group
+      ansible.builtin.assert:
+        that:
+          - avd_nodes[item.name].uplink_switch_interfaces == (item.uplinks | map(attribute='peer_port') | list)
+          - avd_node_groups[item.name] == item.node_group
+          - (item.uplinks | map(attribute='peer') | list) == fabric_vars.l3leaf.defaults.uplink_switches
+        fail_msg: >-
+          Cabling for '{{ item.name }}' disagrees. Registry uplinks:
+          {{ item.uplinks }}; AVD uplink_switch_interfaces:
+          {{ avd_nodes[item.name].uplink_switch_interfaces }}, node_group:
+          {{ avd_node_groups[item.name] }} (registry: {{ item.node_group }}).
+      loop: "{{ registry.nodes | selectattr('role', 'in', l3leaf_roles) | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # Firewall handoff: parallel lists on both sides, flattened to sorted
+    # comparison strings so an off-by-one in any one list is caught.
+    - name: Flatten the firewall handoff as the registry describes it
+      ansible.builtin.set_fact:
+        registry_handoff: >-
+          {%- set out = [] -%}
+          {%- for up in registry.firewall.uplinks -%}
+          {%-   for sub in up.subinterfaces -%}
+          {%-     set _ = out.append(up.peer ~ '|' ~ sub.vrf ~ '|' ~ up.peer_port ~ '.' ~ sub.tag ~ '|' ~ sub.remote ~ '|' ~ sub.tag) -%}
+          {%-   endfor -%}
+          {%- endfor -%}
+          {{ out | sort | to_json }}
+        registry_peers: >-
+          {%- set out = [] -%}
+          {%- for up in registry.firewall.uplinks -%}
+          {%-   for sub in up.subinterfaces -%}
+          {%-     set _ = out.append(up.peer ~ '|' ~ sub.vrf ~ '|' ~ sub.local.split('/')[0]) -%}
+          {%-   endfor -%}
+          {%- endfor -%}
+          {{ out | sort | to_json }}
+
+    - name: Flatten the firewall handoff as AVD network_services describes it
+      ansible.builtin.set_fact:
+        avd_handoff: >-
+          {%- set out = [] -%}
+          {%- for tenant in svc.tenants -%}
+          {%-   for vrf in tenant.vrfs -%}
+          {%-     for li in vrf.l3_interfaces | default([]) -%}
+          {%-       for i in range(li.nodes | length) -%}
+          {%-         set _ = out.append(li.nodes[i] ~ '|' ~ vrf.name ~ '|' ~ li.interfaces[i] ~ '|' ~ li.ip_addresses[i] ~ '|' ~ li.encapsulation_dot1q_vlan[i]) -%}
+          {%-       endfor -%}
+          {%-     endfor -%}
+          {%-   endfor -%}
+          {%- endfor -%}
+          {{ out | sort | to_json }}
+        avd_peers: >-
+          {%- set out = [] -%}
+          {%- for tenant in svc.tenants -%}
+          {%-   for vrf in tenant.vrfs -%}
+          {%-     for peer in vrf.bgp_peers | default([]) -%}
+          {%-       for node in peer.nodes -%}
+          {%-         set _ = out.append(node ~ '|' ~ vrf.name ~ '|' ~ peer.ip_address) -%}
+          {%-       endfor -%}
+          {%-     endfor -%}
+          {%-   endfor -%}
+          {%- endfor -%}
+          {{ out | sort | to_json }}
+
+    - name: Registry and AVD agree on the firewall handoff and its BGP peers
+      ansible.builtin.assert:
+        that:
+          - (registry_handoff | from_json) == (avd_handoff | from_json)
+          - (registry_peers | from_json) == (avd_peers | from_json)
+          - registry.firewall.asn == (svc.tenants | map(attribute='vrfs') | flatten
+              | map(attribute='bgp_peers') | flatten | map(attribute='remote_as') | unique | list | first)
+        fail_msg: >-
+          The firewall handoff disagrees between the registry and
+          network_services.yml.
+          Registry subinterfaces: {{ registry_handoff | from_json }}
+          AVD l3_interfaces:      {{ avd_handoff | from_json }}
+          Registry BGP peers:     {{ registry_peers | from_json }}
+          AVD bgp_peers:          {{ avd_peers | from_json }}
+
+    - name: Flatten the ESI host attachments from both sides
+      ansible.builtin.set_fact:
+        registry_esi: >-
+          {%- set out = [] -%}
+          {%- for host in registry.hosts -%}
+          {%-   for att in host.attachments -%}
+          {%-     set _ = out.append(host.name ~ '|' ~ att.peer ~ '|' ~ att.peer_port ~ '|' ~ host.vlan) -%}
+          {%-   endfor -%}
+          {%- endfor -%}
+          {{ out | sort | to_json }}
+        avd_esi: >-
+          {%- set out = [] -%}
+          {%- for server in svc.servers -%}
+          {%-   for adapter in server.adapters -%}
+          {%-     for i in range(adapter.switches | length) -%}
+          {%-       set _ = out.append(server.name ~ '|' ~ adapter.switches[i] ~ '|' ~ adapter.switch_ports[i] ~ '|' ~ adapter.vlans) -%}
+          {%-     endfor -%}
+          {%-   endfor -%}
+          {%- endfor -%}
+          {{ out | sort | to_json }}
+
+    - name: Registry and AVD agree on every ESI host attachment
+      ansible.builtin.assert:
+        that: (registry_esi | from_json) == (avd_esi | from_json)
+        fail_msg: >-
+          ESI host attachments disagree.
+          Registry: {{ registry_esi | from_json }}
+          AVD servers: {{ avd_esi | from_json }}
+
+    - name: The day-0 template's default gateway matches the registry
+      ansible.builtin.lineinfile:
+        path: "{{ repo }}/containerlab/day0-ceos.cfg.tmpl"
+        regexp: '^ip route vrf MGMT 0\.0\.0\.0/0 '
+        line: "ip route vrf MGMT 0.0.0.0/0 {{ registry.mgmt.gateway }}"
+        state: present
+      check_mode: true
+      register: day0_gateway
+      changed_when: false
+      failed_when: day0_gateway.changed
+
+    # ------------------------------------------------------------- generate
+    # No `mode:` on either template task (checkout umask vs a pinned mode
+    # would falsely trip the drift gate) -- see docs/decisions.md.
+    - name: Generate containerlab/topology.clab.yml
+      # noqa: risky-file-permissions
+      ansible.builtin.template:
+        src: "{{ repo }}/templates/topology.clab.yml.j2"
+        dest: "{{ repo }}/containerlab/topology.clab.yml"
+      register: topology_render
+
+    - name: Generate inventory/inventory.yml
+      # noqa: risky-file-permissions
+      ansible.builtin.template:
+        src: "{{ repo }}/templates/inventory.yml.j2"
+        dest: "{{ repo }}/inventory/inventory.yml"
+      register: inventory_render
+
+    - name: Fail if a generated file is stale
+      ansible.builtin.assert:
+        that: not (topology_render.changed or inventory_render.changed)
+        fail_msg: >-
+          A generated file is out of date with inventory/site_registry.yml.
+          Run `ansible-playbook playbooks/render_lab.yml` and commit the result.
+      when: ansible_check_mode

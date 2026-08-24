@@ -1,0 +1,352 @@
+aaa_root:
+  disabled: true
+as_path:
+  access_lists:
+  - name: ASPATH-LOCAL-ONLY
+    entries:
+    - type: permit
+      match: ^$
+config_end: true
+enable_password:
+  disabled: true
+ethernet_interfaces:
+- name: Ethernet1
+  description: P2P_spine1_Ethernet5
+  shutdown: false
+  mtu: 9214
+  ip_address: 10.254.0.17/31
+  metadata:
+    peer: spine1
+    peer_interface: Ethernet5
+    peer_type: spine
+  switchport:
+    enabled: false
+- name: Ethernet2
+  description: P2P_spine2_Ethernet5
+  shutdown: false
+  mtu: 9214
+  ip_address: 10.254.0.19/31
+  metadata:
+    peer: spine2
+    peer_interface: Ethernet5
+    peer_type: spine
+  switchport:
+    enabled: false
+- name: Ethernet3.3120
+  description: fw1 VRF_BLUE transit
+  shutdown: false
+  vrf: VRF_BLUE
+  encapsulation_dot1q:
+    vlan: 3120
+  ip_address: 10.255.20.0/31
+  metadata:
+    peer_type: l3_interface
+- name: Ethernet3.3110
+  description: fw1 VRF_RED transit
+  shutdown: false
+  vrf: VRF_RED
+  encapsulation_dot1q:
+    vlan: 3110
+  ip_address: 10.255.10.0/31
+  metadata:
+    peer_type: l3_interface
+- name: Ethernet3
+  shutdown: false
+  metadata:
+    peer_type: l3_interface
+  switchport:
+    enabled: false
+hostname: borderleaf1
+ip_igmp_snooping:
+  globally_enabled: true
+ip_routing: true
+ip_virtual_router_mac_address: 00:1c:73:00:dc:01
+local_users:
+- name: admin
+  privilege: 15
+  role: network-admin
+  sha512_password: $6$MWcCxpFSH1YDvFuO$ntxuhDX4iDCt9DhM/z2hjN5vjsWpfSY0aOL2AFGx4rawtwbAGqOQkvH1aLZFLGUTRRUm6qrK7G3rQ8Lr54TVG/
+loopback_interfaces:
+- name: Loopback0
+  description: ROUTER_ID
+  shutdown: false
+  ip_address: 10.255.2.5/32
+- name: Loopback1
+  description: VXLAN_TUNNEL_SOURCE
+  shutdown: false
+  ip_address: 10.255.3.5/32
+- name: Loopback101
+  description: DIAG_VRF_VRF_BLUE
+  shutdown: false
+  vrf: VRF_BLUE
+  ip_address: 10.255.101.5/32
+- name: Loopback100
+  description: DIAG_VRF_VRF_RED
+  shutdown: false
+  vrf: VRF_RED
+  ip_address: 10.255.100.5/32
+management_api_http:
+  enable_http: false
+  enable_https: true
+  enable_vrfs:
+  - name: MGMT
+management_interfaces:
+- name: Management0
+  description: OOB_MANAGEMENT
+  shutdown: false
+  vrf: MGMT
+  ip_address: 172.40.40.31/24
+  type: oob
+  gateway: 172.40.40.1
+metadata:
+  is_deployed: true
+  platform: cEOSLab
+  fabric_name: FABRIC
+  validate_hardware:
+    enabled: false
+prefix_lists:
+- name: PL-LOOPBACKS-EVPN-OVERLAY
+  sequence_numbers:
+  - sequence: 10
+    action: permit 10.255.2.0/24 eq 32
+  - sequence: 20
+    action: permit 10.255.3.0/24 eq 32
+route_maps:
+- name: RM-CONN-2-BGP
+  sequence_numbers:
+  - sequence: 10
+    type: permit
+    match:
+    - ip address prefix-list PL-LOOPBACKS-EVPN-OVERLAY
+- name: RM-FW-IN
+  sequence_numbers:
+  - sequence: 10
+    type: permit
+    set:
+    - community 65103:100 additive
+    - local-preference 80
+- name: RM-FW-OUT
+  sequence_numbers:
+  - sequence: 10
+    type: permit
+    match:
+    - as-path ASPATH-LOCAL-ONLY
+router_bfd:
+  multihop:
+    interval: 300
+    min_rx: 300
+    multiplier: 3
+router_bgp:
+  as: '65103'
+  router_id: 10.255.2.5
+  maximum_paths:
+    paths: 4
+  bgp_defaults:
+  - no bgp default ipv4-unicast
+  bgp:
+    default:
+      ipv4_unicast: false
+  peer_groups:
+  - name: IPv4-UNDERLAY-PEERS
+    metadata:
+      type: ipv4
+    send_community: all
+    maximum_routes: 256000
+  - name: EVPN-OVERLAY-PEERS
+    metadata:
+      type: evpn
+    update_source: Loopback0
+    bfd: true
+    ebgp_multihop: 3
+    send_community: all
+    maximum_routes: 0
+  neighbors:
+  - ip_address: 10.254.0.16
+    peer_group: IPv4-UNDERLAY-PEERS
+    remote_as: '65100'
+    metadata:
+      peer: spine1
+    description: spine1_Ethernet5
+  - ip_address: 10.254.0.18
+    peer_group: IPv4-UNDERLAY-PEERS
+    remote_as: '65100'
+    metadata:
+      peer: spine2
+    description: spine2_Ethernet5
+  - ip_address: 10.255.0.1
+    peer_group: EVPN-OVERLAY-PEERS
+    remote_as: '65100'
+    metadata:
+      peer: spine1
+    description: spine1_Loopback0
+  - ip_address: 10.255.0.2
+    peer_group: EVPN-OVERLAY-PEERS
+    remote_as: '65100'
+    metadata:
+      peer: spine2
+    description: spine2_Loopback0
+  redistribute:
+    connected:
+      enabled: true
+      route_map: RM-CONN-2-BGP
+  vlans:
+  - id: 120
+    metadata:
+      tenants:
+      - Tenant_Blue
+    rd: 10.255.2.5:20120
+    route_targets:
+      both:
+      - 20120:20120
+    redistribute_routes:
+    - learned
+  - id: 110
+    metadata:
+      tenants:
+      - Tenant_Red
+    rd: 10.255.2.5:10110
+    route_targets:
+      both:
+      - 10110:10110
+    redistribute_routes:
+    - learned
+  address_family_evpn:
+    peer_groups:
+    - name: EVPN-OVERLAY-PEERS
+      activate: true
+  address_family_ipv4:
+    peer_groups:
+    - name: IPv4-UNDERLAY-PEERS
+      activate: true
+    - name: EVPN-OVERLAY-PEERS
+      activate: false
+  vrfs:
+  - name: VRF_BLUE
+    rd: 10.255.2.5:20
+    route_targets:
+      import:
+      - address_family: evpn
+        route_targets:
+        - '20:20'
+      export:
+      - address_family: evpn
+        route_targets:
+        - '20:20'
+    router_id: 10.255.2.5
+    neighbors:
+    - ip_address: 10.255.20.1
+      remote_as: '65500'
+      description: fw1 (VRF_BLUE)
+      maximum_routes: 100
+      maximum_routes_warning_only: true
+      route_map_in: RM-FW-IN
+      route_map_out: RM-FW-OUT
+    redistribute:
+      connected:
+        enabled: true
+    address_family_ipv4:
+      neighbors:
+      - ip_address: 10.255.20.1
+        activate: true
+  - name: VRF_RED
+    rd: 10.255.2.5:10
+    route_targets:
+      import:
+      - address_family: evpn
+        route_targets:
+        - '10:10'
+      export:
+      - address_family: evpn
+        route_targets:
+        - '10:10'
+    router_id: 10.255.2.5
+    neighbors:
+    - ip_address: 10.255.10.1
+      remote_as: '65500'
+      description: fw1 (VRF_RED)
+      maximum_routes: 100
+      maximum_routes_warning_only: true
+      route_map_in: RM-FW-IN
+      route_map_out: RM-FW-OUT
+    redistribute:
+      connected:
+        enabled: true
+    address_family_ipv4:
+      neighbors:
+      - ip_address: 10.255.10.1
+        activate: true
+service_routing_protocols_model: multi-agent
+spanning_tree:
+  mode: none
+static_routes:
+- vrf: MGMT
+  prefix: 0.0.0.0/0
+  next_hop: 172.40.40.1
+transceiver_qsfp_default_mode_4x10: true
+virtual_source_nat_vrfs:
+- name: VRF_BLUE
+  ip_address: 10.255.101.5
+- name: VRF_RED
+  ip_address: 10.255.100.5
+vlan_interfaces:
+- name: Vlan120
+  description: BLUE_App
+  shutdown: false
+  vrf: VRF_BLUE
+  ip_address_virtual: 10.20.120.1/24
+  metadata:
+    tenants:
+    - Tenant_Blue
+- name: Vlan110
+  description: RED_App
+  shutdown: false
+  vrf: VRF_RED
+  ip_address_virtual: 10.10.110.1/24
+  metadata:
+    tenants:
+    - Tenant_Red
+vlan_internal_order:
+  allocation: ascending
+  range:
+    beginning: 1006
+    ending: 1199
+vlans:
+- id: 120
+  name: BLUE_App
+  metadata:
+    tenants:
+    - Tenant_Blue
+- id: 110
+  name: RED_App
+  metadata:
+    tenants:
+    - Tenant_Red
+vrfs:
+- name: MGMT
+  ip_routing: false
+- name: VRF_BLUE
+  ip_routing: true
+  metadata:
+    tenants:
+    - Tenant_Blue
+- name: VRF_RED
+  ip_routing: true
+  metadata:
+    tenants:
+    - Tenant_Red
+vxlan_interface:
+  vxlan1:
+    description: borderleaf1_VTEP
+    vxlan:
+      source_interface: Loopback1
+      udp_port: 4789
+      vlans:
+      - id: 120
+        vni: 20120
+      - id: 110
+        vni: 10110
+      vrfs:
+      - name: VRF_BLUE
+        vni: 20
+      - name: VRF_RED
+        vni: 10

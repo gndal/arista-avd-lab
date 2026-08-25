@@ -14,6 +14,11 @@ overlay_evpn: true
 
 p2p_uplinks_mtu: 9214
 
+# Single definition of "where's this host's rendered config," referenced by
+# both playbooks/deploy_confirm.yml and tasks/push_config.yml instead of
+# each hardcoding its own copy of the same path pattern.
+avd_intended_config_path: "{{ inventory_dir }}/intended/configs/{{ inventory_hostname }}.cfg"
+
 # inventory/documentation/ has no consumer in this repo (not referenced by
 # any doc, playbook, or CI drift check) -- disabled rather than generated
 # and left to rot. See docs/decisions.md.

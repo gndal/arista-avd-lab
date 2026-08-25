@@ -13,8 +13,20 @@
   vars:
     commit_timer: "00:05:00"
     settle_seconds: 10
-    config_src: "{{ playbook_dir }}/../inventory/intended/configs/{{ inventory_hostname }}.cfg"
+    config_src: "{{ avd_intended_config_path }}"
     eapi_url: "https://{{ ansible_host }}/command-api"
+    # Common eAPI POST fields, factored out once and merged (`<<: *eapi_common`)
+    # into each of the four calls below instead of repeating them -- pure
+    # YAML-level dedup, resolved before Ansible ever sees it, so register/
+    # when/failed_when on each task are untouched. See docs/decisions.md.
+    eapi_common: &eapi_common
+      url: "{{ eapi_url }}"
+      method: POST
+      user: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      force_basic_auth: true
+      validate_certs: "{{ ansible_httpapi_validate_certs | default(false) }}"
+      body_format: json
 
   tasks:
     - name: Pin a unique session name for this run
@@ -36,13 +48,7 @@
 
     - name: Apply the configuration in a session, armed to revert
       ansible.builtin.uri:
-        url: "{{ eapi_url }}"
-        method: POST
-        user: "{{ ansible_user }}"
-        password: "{{ ansible_password }}"
-        force_basic_auth: true
-        validate_certs: "{{ ansible_httpapi_validate_certs | default(false) }}"
-        body_format: json
+        <<: *eapi_common
         timeout: 120
         body:
           jsonrpc: "2.0"
@@ -85,13 +91,7 @@
 
     - name: Check the device is still reachable
       ansible.builtin.uri:
-        url: "{{ eapi_url }}"
-        method: POST
-        user: "{{ ansible_user }}"
-        password: "{{ ansible_password }}"
-        force_basic_auth: true
-        validate_certs: "{{ ansible_httpapi_validate_certs | default(false) }}"
-        body_format: json
+        <<: *eapi_common
         timeout: 30
         body:
           jsonrpc: "2.0"
@@ -107,13 +107,7 @@
 
     - name: Confirm the commit
       ansible.builtin.uri:
-        url: "{{ eapi_url }}"
-        method: POST
-        user: "{{ ansible_user }}"
-        password: "{{ ansible_password }}"
-        force_basic_auth: true
-        validate_certs: "{{ ansible_httpapi_validate_certs | default(false) }}"
-        body_format: json
+        <<: *eapi_common
         timeout: 60
         body:
           jsonrpc: "2.0"
@@ -133,13 +127,7 @@
       # Only after a confirmed commit -- saving a config about to revert
       # would defeat the mechanism.
       ansible.builtin.uri:
-        url: "{{ eapi_url }}"
-        method: POST
-        user: "{{ ansible_user }}"
-        password: "{{ ansible_password }}"
-        force_basic_auth: true
-        validate_certs: "{{ ansible_httpapi_validate_certs | default(false) }}"
-        body_format: json
+        <<: *eapi_common
         timeout: 60
         body:
           jsonrpc: "2.0"

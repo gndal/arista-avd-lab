@@ -3,7 +3,7 @@
 # applies, and commits in one call -- no confirm/abort step).
 - name: Apply rendered configuration
   arista.eos.eos_config:
-    src: "{{ push_config_src | default('../inventory/intended/configs/' ~ inventory_hostname ~ '.cfg') }}"
+    src: "{{ push_config_src | default(avd_intended_config_path) }}"
     replace: config
   vars:
     ansible_command_timeout: 240
